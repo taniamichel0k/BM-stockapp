@@ -1,23 +1,42 @@
 import threading
+import io
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 from PIL import Image
+import qrcode
+import base64
 
 try:
     import zxingcpp
 except ImportError:
     zxingcpp = None
 
-
-
 from config import settings
 from services.stock_service import StockService
 from services.sync_service import sync_service, LiveSyncService
 from services.tunnel_service import TunnelService
 from models.schemas import StockItem
-import base64
+
+CLOUD_APP_URL = "https://stock-buenamadera.streamlit.app"
+
+def generate_qr_base64(data_url: str, box_size: int = 6) -> str:
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=box_size,
+            border=2,
+        )
+        qr.add_data(data_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#0f172a", back_color="#ffffff")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception:
+        return ""
 
 def _load_base64_asset(filepath: str) -> str:
     try:
@@ -32,7 +51,7 @@ st.set_page_config(
     page_title="Control de Stock BM",
     page_icon="assets/icon_bm_square.png",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # Asegurar que la API de sincronización en tiempo real esté activa en puerto 8000
@@ -296,24 +315,26 @@ with st.sidebar:
     )
     st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
-    # Código QR y enlace permanente a la Nube
-    cloud_url = "https://stock-buenamadera.streamlit.app"
-    qr_cloud_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cloud_url}"
-    st.markdown("**🌐 App Celular Permanente (24/7 en la Nube):**")
-    st.markdown(f'''
-    <div style="text-align: center; margin: 6px 0;">
-        <img src="{qr_cloud_url}" width="135" style="border-radius: 8px; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.08);"><br>
-        <a href="{cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
-            {cloud_url} ↗
-        </a>
-    </div>
-    ''', unsafe_allow_html=True)
+    # Código QR y enlace permanente a la Nube (Generado localmente en base64)
+    qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=6)
+    st.markdown("**🌐 App Celular (Enlace Permanente):**")
+    if qr_cloud_b64:
+        st.markdown(f'''
+        <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #0284c7; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
+            <img src="data:image/png;base64,{qr_cloud_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
+            <a href="{CLOUD_APP_URL}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
+                {CLOUD_APP_URL} ↗
+            </a>
+        </div>
+        ''', unsafe_allow_html=True)
+    else:
+        st.markdown(f"👉 [{CLOUD_APP_URL}]({CLOUD_APP_URL})")
     st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
 
     with st.expander("📶 Conexión directa por Wi-Fi Local"):
         local_url = f"http://{local_ip}:8501"
         st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
-        if tunnel_url and tunnel_url != cloud_url:
+        if tunnel_url and tunnel_url != CLOUD_APP_URL:
             st.caption(f"Túnel temporal PC: `{tunnel_url}`")
 
 
@@ -538,54 +559,46 @@ def on_dropdown_select():
             new_ver = sync_service.broadcast_scan(chosen, source="Selector de Lista")
             st.session_state.sync_version = new_ver
 
-def render_camera_scanner_component(key_suffix: str = "main"):
+def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
     """
-    Renderiza el escáner de cámara nativo compatible con celulares Android / iOS.
-    Usa la cámara del sistema para leer códigos de barra en alta definición sin bloqueos.
+    Componente para vincular la aplicación de celular con la app de escritorio mediante código QR.
+    Generado 100% en local y sin dependencias externas.
     """
-    if "cam_counter" not in st.session_state:
-        st.session_state.cam_counter = 0
-
-    st.markdown("""
-    <div style="background-color: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;">
-        <p style="margin: 0 0 4px 0; font-size: 0.95rem; font-weight: 700; color: #166534;">
-            📱 Modo Cámara de Celular / Tablet:
-        </p>
-        <p style="margin: 0; font-size: 0.88rem; color: #15803d; line-height: 1.4;">
-            Toca el botón para abrir la cámara de tu teléfono. Al detectar el código, se cargará automáticamente y se limpiará para que puedas escanear el siguiente sin demoras.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    cam_key = f"file_cam_{key_suffix}_{st.session_state.cam_counter}"
-    file_pic = st.file_uploader(
-        "📸 SACAR FOTO CON LA CÁMARA DEL CELULAR:",
-        type=["jpg", "jpeg", "png", "webp"],
-        key=cam_key,
-        help="Abre la cámara de tu teléfono con autofoco para leer el código de barras."
-    )
-    
-    if file_pic:
-        try:
-            img = Image.open(file_pic)
-            decoded = zxingcpp.read_barcode(img) if zxingcpp else None
-
-            if decoded and decoded.text:
-                detected_raw = decoded.text.strip()
-                clean_code = detected_raw.replace('"', '-').replace("'", '-').replace('/', '-').replace('_', '-').replace('?', '-')
-                st.session_state.active_barcode = clean_code
-                st.session_state.show_success_msg = None
-                # Se incrementa cam_counter para resetear el uploader y descartar la foto procesada de inmediato
-                st.session_state.cam_counter += 1
-                if st.session_state.get("sync_mode") == "MIRROR":
-                    new_ver = sync_service.broadcast_scan(clean_code, source="Cámara Celular")
-                    st.session_state.sync_version = new_ver
-                st.toast(f"✅ ¡Código detectado: {detected_raw}!", icon="🎯")
-                st.rerun()
+    with st.expander("📱 **Vincular Celular a la App de Escritorio (Escanear Código QR)**", expanded=expanded):
+        col_vinc_qr, col_vinc_info = st.columns([1, 2])
+        with col_vinc_qr:
+            qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=7)
+            if qr_cloud_b64:
+                st.markdown(f'''
+                <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
+                    <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
+                    <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear con la cámara del celular</span>
+                </div>
+                ''', unsafe_allow_html=True)
             else:
-                st.warning("🔍 No se detectó un código legible en la foto. Asegúrate de enfocar bien las barras y con buena iluminación.")
-        except Exception as err:
-            st.error(f"Error procesando imagen de la cámara: {err}")
+                st.info(f"🔗 [Abrir App Celular]({CLOUD_APP_URL})")
+
+        with col_vinc_info:
+            st.markdown(f"""
+            #### 📲 **¿Cómo vincular tu teléfono en 2 pasos?**
+            1. **Abre la cámara de tu celular** (o cualquier app lectora de QR) y enfoca el código QR de la izquierda.
+            2. **Toca la notificación** que aparece en la pantalla de tu celular para abrir la app móvil:
+               👉 **[{CLOUD_APP_URL}]({CLOUD_APP_URL})**
+            
+            ✨ **Acceso 24/7 en la Nube:** No requiere que la PC esté encendida. Podés cargar stock, recuentos o compras desde cualquier celular con Wi-Fi o datos móviles 4G.
+            
+            💡 **Instalar en el celular:** En Chrome o Safari, toca los 3 puntitos del navegador y presiona **"Agregar a la pantalla de inicio"** para usarla como una aplicación instalada con el logo de Buena Madera.
+            """)
+            
+            with st.expander("📶 ¿Querés conectarte por la red Wi-Fi local del taller?"):
+                local_wifi_url = f"http://{local_ip}:8501"
+                qr_local_b64 = generate_qr_base64(local_wifi_url, box_size=5)
+                c_loc1, c_loc2 = st.columns([1, 2])
+                with c_loc1:
+                    if qr_local_b64:
+                        st.markdown(f'<img src="data:image/png;base64,{qr_local_b64}" width="120" style="border-radius: 6px; border: 1px solid #cbd5e1;">', unsafe_allow_html=True)
+                with c_loc2:
+                    st.caption(f"Si tu celular está conectado al mismo Wi-Fi que esta computadora, también podés acceder localmente a:\n`{local_wifi_url}`")
 
 # Mensaje de confirmación cuando se acaba de guardar un stock o crear pestaña
 if st.session_state.get("show_success_msg"):
@@ -838,8 +851,7 @@ with col_opt2:
                 st.session_state.sync_version = new_ver
             st.rerun()
 
-with st.expander("📷 **Escanear con Cámara del Celular / Tablet**", expanded=False):
-    render_camera_scanner_component(key_suffix="top_panel")
+render_phone_linking_card(key_suffix="main_panel", expanded=True)
 
 st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 st.divider()
@@ -921,20 +933,7 @@ with col_sync:
             else:
                 st.toast("Alerta simulada (ver .env)", icon="ℹ️")
 
-# Panel de Enlace en Vivo PC ⇄ Celular (Modo Dúo)
-with st.expander("📱 **Modo Dúo: Enlazar Celular en Vivo con el Escáner de la PC (Ver QR / Link)**", expanded=False):
-    col_qr1, col_qr2 = st.columns([2, 5])
-    with col_qr1:
-        qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=http://{local_ip}:8501"
-        st.markdown(f'<img src="{qr_api_url}" alt="QR Celular" style="border-radius: 8px; border: 1px solid #cbd5e1; width: 140px; height: 140px;">', unsafe_allow_html=True)
-    with col_qr2:
-        st.markdown(f"""
-        **¿Cómo usarlo en el celular?**
-        1. Conecta tu celular a la misma red **Wi-Fi** que esta computadora.
-        2. Abre la cámara del celular y escanea el código QR, o escribe en el navegador:
-           👉 **`{mobile_url}`**
-        3. **¡Listo!** Cuando dispares con el lector NICTOM en la PC, **el producto aparecerá arriba de todo en tu celular**. Podrás cargar el conteo físico, compras, stock mínimo o notas y guardarlo directamente en Google Sheets.
-        """)
+
 
 # --- 4. HISTORIAL DE ESCANEOS RECIENTES ---
 if st.session_state.scan_history:
