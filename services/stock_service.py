@@ -42,7 +42,7 @@ class StockService:
         return items
 
     def find_by_barcode(self, barcode: str, items: Optional[List[StockItem]] = None, tab_name: Optional[str] = None) -> Optional[StockItem]:
-        """Busca un ítem por código de barras exacto, alias registrado o coincidencia alfanumérica limpia."""
+        """Busca un ítem por código de barras exacto, alias registrado, tokens, números clave o descripción."""
         if not barcode:
             return None
         
@@ -69,6 +69,8 @@ class StockService:
             code_alpha = aliases[code_alpha]
 
         catalog = items if items is not None else self.sheets.load_from_google_sheets(tab_name=tab_name)
+        if not catalog:
+            return None
         
         # 2. Coincidencia exacta o normalizada directa
         for it in catalog:
@@ -83,8 +85,40 @@ class StockService:
                 if b_alpha and b_alpha == code_alpha:
                     return it
 
-        # Si no coincide de forma exacta ni por alias, retornamos None
-        # para que la app permita vincularlo limpiamente al insumo correcto sin mezclar productos.
+        # 4. Coincidencia por estructura de tokens (ej: TOR-FIX-75 coincide con TOR-FIX-075)
+        tokens = [t for t in re.split(r'[^A-Za-z0-9]+', raw_str) if t]
+        if len(tokens) >= 2:
+            for it in catalog:
+                it_tokens = [t for t in re.split(r'[^A-Za-z0-9]+', it.barcode.upper()) if t]
+                if len(tokens) == len(it_tokens):
+                    match = True
+                    for t1, t2 in zip(tokens, it_tokens):
+                        if t1.lstrip('0') != t2.lstrip('0') and t1 != t2:
+                            match = False
+                            break
+                    if match:
+                        return it
+
+        # 5. Coincidencia por descripción (ej: 'terciado', 'terceado', 'fana', 'cinta')
+        raw_low = raw_str.lower()
+        for it in catalog:
+            d_low = it.description.strip().lower()
+            if len(raw_low) >= 4 and (raw_low in d_low or d_low in raw_low):
+                return it
+            if "terc" in raw_low and "terc" in d_low:
+                return it
+
+        # 6. Coincidencia por número identificador de modelo (ej: 9040, 8411, 045, 075, 025, 516)
+        # Nota de seguridad: Solo se aceptan números significativos (>= 2 dígitos no ceros o >= 3 caracteres),
+        # jamás dígitos simples como '1' o '2' para evitar mezclar productos.
+        digits = [d for d in re.findall(r'\d+', raw_str) if len(d.lstrip('0')) >= 2 or len(d) >= 3]
+        for d in digits:
+            d_u = d.lstrip('0')
+            for it in catalog:
+                it_digits = [x.lstrip('0') for x in re.findall(r'\d+', it.barcode) if len(x.lstrip('0')) >= 2 or len(x) >= 3]
+                if d_u in it_digits:
+                    return it
+
         return None
 
     def link_barcode(self, scanned_code: str, target_barcode: str) -> bool:
