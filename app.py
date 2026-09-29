@@ -215,30 +215,35 @@ if "cam_counter" not in st.session_state:
 def live_sync_watcher():
     shared_state = sync_service.get_state()
     server_version = shared_state.get("version", 0)
-    if server_version > st.session_state.get("sync_version", 0):
+    prev_ver = st.session_state.get("sync_version", 0)
+    
+    if server_version > prev_ver:
         st.session_state.sync_version = server_version
         action = shared_state.get("action")
         src = shared_state.get("source", "Dispositivo")
+        ts = shared_state.get("timestamp", 0)
         
         # En modo Espejo (por defecto), clonar escaneo de otro dispositivo inmediatamente
         if st.session_state.get("sync_mode", "MIRROR") == "MIRROR":
             if action == "SCAN":
                 scanned_code = shared_state.get("barcode", "")
-                if scanned_code and scanned_code != st.session_state.get("active_barcode"):
-                    st.session_state.active_barcode = scanned_code
-                    st.session_state.show_success_msg = None
-                    st.rerun()
+                if scanned_code:
+                    # Si es la primera apertura en celular, sincronizar si fue escaneado en los últimos 5 minutos
+                    if prev_ver > 0 or (time.time() - ts < 300):
+                        st.session_state.active_barcode = scanned_code
+                        st.session_state.show_success_msg = None
+                        st.rerun(scope="app")
             elif action == "CLEAR":
                 if st.session_state.get("active_barcode"):
                     st.session_state.active_barcode = ""
-                    st.rerun()
+                    st.rerun(scope="app")
             elif action == "SAVED":
                 p_name = shared_state.get("product_name", "")
                 n_stock = shared_state.get("new_stock", 0.0)
                 if p_name:
                     st.session_state.show_success_msg = f"🎉 Stock de **{p_name}** actualizado a **{n_stock:g}** ({src}) en Google Sheets."
                 st.session_state.active_barcode = ""
-                st.rerun()
+                st.rerun(scope="app")
 
         # En modo Independiente, solo notificar guardados sin cambiar la pantalla activa
         elif action == "SAVED":
