@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+*.log
+
+# Environment variables & secrets
+.env
+**/*.json
+!credentials/credentials.example.json
+!credentials.example.json
+credentials/
+!credentials/
+!credentials/credentials.example.json
+streamlit_secrets_ready.toml
+Clave.json/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local data & caches
+data/
+data/*
+!data/.gitkeep
+
+# Binaries & Builds
+*.exe
+build/
+dist/
+*.spec
+scratch/
+.git_bin/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
