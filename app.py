@@ -296,15 +296,26 @@ with st.sidebar:
     )
     st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
-    if tunnel_url:
-        st.markdown("**🌐 Acceso Remoto 4G / Cualquier Red:**")
-        qr_tunnel_url = f"https://api.qrserver.com/v1/create-qr-code/?size=160x160&data={tunnel_url}"
-        st.markdown(f'<div style="text-align: center;"><img src="{qr_tunnel_url}" width="130" style="border-radius: 8px; border: 1px solid #cbd5e1;"><br><a href="{tunnel_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7;">{tunnel_url}</a></div>', unsafe_allow_html=True)
-        st.caption("✨ Escaneá este QR desde el celular con tus datos móviles (4G/5G).")
+    # Código QR y enlace permanente a la Nube
+    cloud_url = "https://stock-buenamadera.streamlit.app"
+    qr_cloud_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cloud_url}"
+    st.markdown("**🌐 App Celular Permanente (24/7 en la Nube):**")
+    st.markdown(f'''
+    <div style="text-align: center; margin: 6px 0;">
+        <img src="{qr_cloud_url}" width="135" style="border-radius: 8px; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.08);"><br>
+        <a href="{cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
+            {cloud_url} ↗
+        </a>
+    </div>
+    ''', unsafe_allow_html=True)
+    st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
 
-    st.markdown("**📶 Red Wi-Fi Local (Mismo Wi-Fi):**")
-    local_url = f"http://{local_ip}:8501"
-    st.caption(f"`{local_url}`")
+    with st.expander("📶 Conexión directa por Wi-Fi Local"):
+        local_url = f"http://{local_ip}:8501"
+        st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
+        if tunnel_url and tunnel_url != cloud_url:
+            st.caption(f"Túnel temporal PC: `{tunnel_url}`")
+
 
 # --- 1. ENCABEZADO COMPACTO DE LA APP ---
 st.markdown(f"""
