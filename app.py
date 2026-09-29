@@ -4,7 +4,13 @@ import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 from PIL import Image
-import zxingcpp
+
+try:
+    import zxingcpp
+except ImportError:
+    zxingcpp = None
+
+
 
 from config import settings
 from services.stock_service import StockService
@@ -551,7 +557,8 @@ def render_camera_scanner_component(key_suffix: str = "main"):
     if file_pic:
         try:
             img = Image.open(file_pic)
-            decoded = zxingcpp.read_barcode(img)
+            decoded = zxingcpp.read_barcode(img) if zxingcpp else None
+
             if decoded and decoded.text:
                 detected_raw = decoded.text.strip()
                 clean_code = detected_raw.replace('"', '-').replace("'", '-').replace('/', '-').replace('_', '-').replace('?', '-')
