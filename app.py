@@ -562,43 +562,66 @@ def on_dropdown_select():
 def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
     """
     Componente para vincular la aplicación de celular con la app de escritorio mediante código QR.
-    Generado 100% en local y sin dependencias externas.
+    Ofrece Modo Espejo en tiempo real (PC ⇄ Celular) y Modo Nube 24/7 permanente.
     """
     with st.expander("📱 **Vincular Celular a la App de Escritorio (Escanear Código QR)**", expanded=expanded):
-        col_vinc_qr, col_vinc_info = st.columns([1, 2])
-        with col_vinc_qr:
-            qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=7)
-            if qr_cloud_b64:
-                st.markdown(f'''
-                <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
-                    <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
-                    <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear con la cámara del celular</span>
-                </div>
-                ''', unsafe_allow_html=True)
-            else:
-                st.info(f"🔗 [Abrir App Celular]({CLOUD_APP_URL})")
+        tab_sync, tab_cloud = st.tabs([
+            "⚡ Modo Espejo en Vivo (Refleja el escáner de la PC)",
+            "🌐 App Celular Permanente (En la Nube 24/7)"
+        ])
+        
+        with tab_sync:
+            col_s_qr, col_s_info = st.columns([1, 2])
+            live_mirror_url = tunnel_url or f"http://{local_ip}:8501"
+            qr_live_b64 = generate_qr_base64(live_mirror_url, box_size=7)
+            with col_s_qr:
+                if qr_live_b64:
+                    st.markdown(f'''
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #16a34a; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.15); display: inline-block;">
+                        <img src="data:image/png;base64,{qr_live_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
+                        <span style="font-size: 0.8rem; font-weight: 700; color: #166534;">⚡ Escanear para Modo Espejo</span>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    st.info(f"👉 Enlace en vivo: {live_mirror_url}")
 
-        with col_vinc_info:
-            st.markdown(f"""
-            #### 📲 **¿Cómo vincular tu teléfono en 2 pasos?**
-            1. **Abre la cámara de tu celular** (o cualquier app lectora de QR) y enfoca el código QR de la izquierda.
-            2. **Toca la notificación** que aparece en la pantalla de tu celular para abrir la app móvil:
-               👉 **[{CLOUD_APP_URL}]({CLOUD_APP_URL})**
-            
-            ✨ **Acceso 24/7 en la Nube:** No requiere que la PC esté encendida. Podés cargar stock, recuentos o compras desde cualquier celular con Wi-Fi o datos móviles 4G.
-            
-            💡 **Instalar en el celular:** En Chrome o Safari, toca los 3 puntitos del navegador y presiona **"Agregar a la pantalla de inicio"** para usarla como una aplicación instalada con el logo de Buena Madera.
-            """)
-            
-            with st.expander("📶 ¿Querés conectarte por la red Wi-Fi local del taller?"):
-                local_wifi_url = f"http://{local_ip}:8501"
-                qr_local_b64 = generate_qr_base64(local_wifi_url, box_size=5)
-                c_loc1, c_loc2 = st.columns([1, 2])
-                with c_loc1:
-                    if qr_local_b64:
-                        st.markdown(f'<img src="data:image/png;base64,{qr_local_b64}" width="120" style="border-radius: 6px; border: 1px solid #cbd5e1;">', unsafe_allow_html=True)
-                with c_loc2:
-                    st.caption(f"Si tu celular está conectado al mismo Wi-Fi que esta computadora, también podés acceder localmente a:\n`{local_wifi_url}`")
+            with col_s_info:
+                st.markdown(f"""
+                #### ⚡ **Modo Espejo en Tiempo Real (PC ⇄ Celular):**
+                Al escanear este código QR, tu celular se conecta **directamente a esta computadora**:
+                1. **Disparas con el lector NICTOM en la PC.**
+                2. **El producto aparece inmediatamente en la pantalla de tu celular** en tiempo real.
+                3. Puedes ingresar el conteo físico, compras, stock mínimo o notas desde el celular y guardar directamente en Google Sheets.
+                
+                👉 Enlace de conexión directa: **[{live_mirror_url}]({live_mirror_url})**
+                """)
+                if tunnel_url:
+                    st.caption("✨ Funciona conectado por Wi-Fi o datos móviles 4G mediante túnel seguro.")
+                else:
+                    st.caption(f"📶 Requiere estar conectado a la misma red Wi-Fi del taller (`{local_ip}`).")
+
+        with tab_cloud:
+            col_c_qr, col_c_info = st.columns([1, 2])
+            qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=7)
+            with col_c_qr:
+                if qr_cloud_b64:
+                    st.markdown(f'''
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
+                        <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
+                        <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear para App en la Nube</span>
+                    </div>
+                    ''', unsafe_allow_html=True)
+            with col_c_info:
+                st.markdown(f"""
+                #### 🌐 **App Fija en la Nube (24/7 sin PC):**
+                Esta versión funciona permanentemente en internet sin importar si la PC está prendida o apagada:
+                - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G.
+                - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
+                
+                👉 Enlace permanente: **[{CLOUD_APP_URL}]({CLOUD_APP_URL})**
+                
+                💡 **Para guardarla en tu celular:** Abre el enlace en Chrome o Safari, toca los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
+                """)
 
 # Mensaje de confirmación cuando se acaba de guardar un stock o crear pestaña
 if st.session_state.get("show_success_msg"):

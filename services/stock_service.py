@@ -42,7 +42,7 @@ class StockService:
         return items
 
     def find_by_barcode(self, barcode: str, items: Optional[List[StockItem]] = None, tab_name: Optional[str] = None) -> Optional[StockItem]:
-        """Busca un ítem por código de barras, alias registrado, tokens, números clave o descripción."""
+        """Busca un ítem por código de barras exacto, alias registrado o coincidencia alfanumérica limpia."""
         if not barcode:
             return None
         
@@ -76,65 +76,15 @@ class StockService:
             if b_clean == raw_str or b_clean == normalized_code:
                 return it
 
-        # 3. Coincidencia alfanumérica directa (ej: POL02CM001 == POL02CM001, INSGRA9040 == INSGRA9040)
+        # 3. Coincidencia alfanumérica directa (ej: POL02CM001 == POL-02CM-001, INSGRA9040 == INS-GRA-9040)
         if code_alpha:
             for it in catalog:
                 b_alpha = "".join(c for c in it.barcode.strip().upper() if c.isalnum())
                 if b_alpha and b_alpha == code_alpha:
                     return it
 
-        # 4. Coincidencia por subcadena
-        for it in catalog:
-            b_clean = it.barcode.strip().upper()
-            if len(normalized_code) >= 3 and (normalized_code in b_clean or b_clean in normalized_code):
-                return it
-
-        # 5. Coincidencia por tokens (ej: ['TOR', 'FIX', '45'] coincide con 'TOR-FIX-045')
-        tokens = [t for t in re.split(r'[^A-Za-z0-9]+', raw_str) if t]
-        if tokens:
-            # Buscar coincidencia donde todos o la mayoría de tokens significativos estén presentes
-            best_match = None
-            max_score = 0
-            for it in catalog:
-                it_str = f"{it.barcode} {it.description}".upper()
-                it_tokens = set(re.split(r'[^A-Za-z0-9]+', it_str))
-                it_numbers = [t.lstrip('0') for t in it_tokens if t.isdigit()]
-                
-                score = 0
-                for tok in tokens:
-                    if tok in it_tokens:
-                        score += 2
-                    elif tok.isdigit() and tok.lstrip('0') in it_numbers:
-                        score += 3  # Coincidencia numérica (ej: 45 == 045, 25 == 025, 75 == 075)
-                    elif any(tok in it_t or it_t in tok for it_t in it_tokens if len(tok) >= 3):
-                        score += 1
-                
-                if score > max_score and score >= len(tokens):
-                    max_score = score
-                    best_match = it
-
-            if best_match and max_score >= 2:
-                return best_match
-
-        # 6. Coincidencia por descripción (ej: "grampas 9040", "tornillo 75", "fana")
-        code_lower = raw_str.lower()
-        for it in catalog:
-            desc_lower = it.description.strip().lower()
-            if code_lower in desc_lower or desc_lower in code_lower:
-                return it
-
-        # 7. Coincidencia por número identificador clave (ej: 9040, 8411, 516, 045, 025, 075)
-        all_digits = re.findall(r'\d+', raw_str)
-        if all_digits:
-            for d in all_digits:
-                d_unpadded = d.lstrip('0')
-                if not d_unpadded:
-                    continue
-                for it in catalog:
-                    it_digits = [x.lstrip('0') for x in re.findall(r'\d+', it.barcode) if x.lstrip('0')]
-                    if d_unpadded in it_digits:
-                        return it
-
+        # Si no coincide de forma exacta ni por alias, retornamos None
+        # para que la app permita vincularlo limpiamente al insumo correcto sin mezclar productos.
         return None
 
     def link_barcode(self, scanned_code: str, target_barcode: str) -> bool:
