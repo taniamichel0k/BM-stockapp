@@ -19,7 +19,7 @@ from services.sync_service import sync_service, LiveSyncService
 from services.tunnel_service import TunnelService
 from models.schemas import StockItem
 
-CLOUD_APP_URL = "https://stock-buenamadera.streamlit.app"
+CLOUD_APP_URL = "https://bm-stockapp.streamlit.app"
 
 def generate_qr_base64(data_url: str, box_size: int = 6) -> str:
     try:
