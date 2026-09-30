@@ -34,9 +34,19 @@ if query_app in ("mobile", "celular"):
 elif query_app == "pc":
     is_pc_app = True
 else:
-    # Por defecto: Si corre en Windows o es ejecutable .exe, es la app de PC.
-    # En Streamlit Cloud / Linux, es la app de celular.
-    is_pc_app = (os.name == 'nt') or getattr(sys, 'frozen', False)
+    user_agent = ""
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "headers") and st.context.headers:
+            user_agent = str(st.context.headers.get("user-agent", "")).lower()
+    except Exception:
+        user_agent = ""
+
+    if any(m in user_agent for m in ("android", "iphone", "ipad", "ipod", "mobile")):
+        is_pc_app = False
+    else:
+        # Por defecto: Si corre en Windows o es ejecutable .exe, es la app de PC.
+        # En Streamlit Cloud / Linux, es la app de celular.
+        is_pc_app = (os.name == 'nt') or getattr(sys, 'frozen', False)
 
 def generate_qr_base64(data_url: str, box_size: int = 6) -> str:
     try:
@@ -335,43 +345,44 @@ with st.sidebar:
         st.toast("Datos sincronizados con Google Sheets", icon="🔄")
         st.rerun()
         
-    st.divider()
-    st.markdown("#### 📱 **Conexión Celular (4G / Wi-Fi)**")
-    
-    # Selector de modo de sincronización
-    mode_options = ["Espejo en Tiempo Real (Recomendado)", "Independiente (Sin clonar pantalla)"]
-    cur_mode_idx = 0 if st.session_state.get("sync_mode") == "MIRROR" else 1
-    selected_mode = st.radio(
-        "Modo de trabajo:",
-        mode_options,
-        index=cur_mode_idx,
-        key="sb_sync_mode_radio",
-        help="En modo Espejo, cuando el lector NICTOM escanea en la PC, el producto y sus datos aparecen inmediatamente en el celular en tiempo real."
-    )
-    st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
+    if is_pc_app:
+        st.divider()
+        st.markdown("#### 📱 **Conexión Celular (4G / Wi-Fi)**")
+        
+        # Selector de modo de sincronización
+        mode_options = ["Espejo en Tiempo Real (Recomendado)", "Independiente (Sin clonar pantalla)"]
+        cur_mode_idx = 0 if st.session_state.get("sync_mode") == "MIRROR" else 1
+        selected_mode = st.radio(
+            "Modo de trabajo:",
+            mode_options,
+            index=cur_mode_idx,
+            key="sb_sync_mode_radio",
+            help="En modo Espejo, cuando el lector NICTOM escanea en la PC, el producto y sus datos aparecen inmediatamente en el celular en tiempo real."
+        )
+        st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
-    # Código QR y enlace permanente a la Nube (Generado localmente en base64)
-    mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
-    qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=6)
-    st.markdown("**🌐 App Celular (Enlace Permanente):**")
-    if qr_cloud_b64:
-        st.markdown(f'''
-        <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #0284c7; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
-            <img src="data:image/png;base64,{qr_cloud_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
-            <a href="{mobile_cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
-                {CLOUD_APP_URL} ↗
-            </a>
-        </div>
-        ''', unsafe_allow_html=True)
-    else:
-        st.markdown(f"👉 [{CLOUD_APP_URL}]({mobile_cloud_url})")
-    st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
+        # Código QR y enlace permanente a la Nube (Generado localmente en base64)
+        mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
+        qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=6)
+        st.markdown("**🌐 App Celular (Enlace Permanente):**")
+        if qr_cloud_b64:
+            st.markdown(f'''
+            <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #0284c7; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
+                <img src="data:image/png;base64,{qr_cloud_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
+                <a href="{mobile_cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
+                    {CLOUD_APP_URL} ↗
+                </a>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown(f"👉 [{CLOUD_APP_URL}]({mobile_cloud_url})")
+        st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
 
-    with st.expander("📶 Conexión directa por Wi-Fi Local"):
-        local_url = f"http://{local_ip}:8501"
-        st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
-        if tunnel_url and tunnel_url != CLOUD_APP_URL:
-            st.caption(f"Túnel temporal PC: `{tunnel_url}`")
+        with st.expander("📶 Conexión directa por Wi-Fi Local"):
+            local_url = f"http://{local_ip}:8501"
+            st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
+            if tunnel_url and tunnel_url != CLOUD_APP_URL:
+                st.caption(f"Túnel temporal PC: `{tunnel_url}`")
 
 
 def render_manufacturing_module(items, available_tabs, stock_service_instance):
@@ -1265,87 +1276,88 @@ with col_opt2:
                 st.session_state.sync_version = new_ver
             st.rerun()
 
-render_phone_linking_card(key_suffix="main_panel", expanded=True)
+if is_pc_app:
+    render_phone_linking_card(key_suffix="main_panel", expanded=True)
 
-st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
-st.divider()
+    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+    st.divider()
 
-# =========================================================================================
-# --- 3. CONTROLES DE PESTAÑA SEMANAL & KPIS (DEBAJO DEL ESCÁNER) ---
-# =========================================================================================
-st.markdown("### 📊 Control Semanal & Métricas de Fábrica")
+    # =========================================================================================
+    # --- 3. CONTROLES DE PESTAÑA SEMANAL & KPIS (DEBAJO DEL ESCÁNER) ---
+    # =========================================================================================
+    st.markdown("### 📊 Control Semanal & Métricas de Fábrica")
 
-col_tab1, col_tab2 = st.columns([5, 5])
-with col_tab1:
-    tab_index = available_tabs.index(st.session_state.active_tab) if st.session_state.active_tab in available_tabs else 0
-    selected_tab_choice = st.selectbox(
-        "📅 Pestaña de Recuento Semanal Activa en Google Sheets:",
-        available_tabs,
-        index=tab_index,
-        help="Selecciona en qué pestaña de la planilla de Google Sheets impactan los escaneos y recuentos.",
-        key="weekly_tab_picker",
-    )
-    if selected_tab_choice != st.session_state.active_tab:
-        st.session_state.active_tab = selected_tab_choice
-        st.rerun()
-
-with col_tab2:
-    st.write("")
-    is_current = (st.session_state.active_tab == current_week_tab)
-    badge_label = f"🟢 Pestaña Activa ({st.session_state.active_tab})" if is_current else f"📁 Histórico ({st.session_state.active_tab})"
-    st.markdown(f'<div style="margin-top: 4px;"><span class="tab-badge">{badge_label}</span> <span style="font-size: 0.85rem; color: #64748b;">(Todo escaneo impacta en la tabla izquierda de esta pestaña)</span></div>', unsafe_allow_html=True)
-    
-    with st.expander("➕ **Abrir / Crear Nueva Pestaña Semanal en Google Sheets**", expanded=False):
-        st.caption("Crea una nueva pestaña en Google Sheets duplicando la estructura base, con las fórmulas y catálogos pero con la tabla de la izquierda vacía para el nuevo recuento.")
-        next_monday = datetime.now() + timedelta(days=(7 - datetime.now().weekday()) % 7 or 7)
-        suggested_tab = f"STOCK_{next_monday.strftime('%d.%m.%y')}"
-        col_nt1, col_nt2 = st.columns([3, 2])
-        with col_nt1:
-            new_tab_name_input = st.text_input("Nombre de la nueva pestaña:", value=suggested_tab, key="new_tab_input_name")
-        with col_nt2:
-            st.write("")
-            st.write("")
-            if st.button("🚀 Crear Pestaña", type="primary", use_container_width=True):
-                try:
-                    created_title = service.create_new_weekly_tab(new_tab_name_input.strip())
-                    st.session_state.active_tab = created_title
-                    available_tabs = service.get_available_tabs(force_refresh=True)
-                    st.success(f"¡Pestaña '{created_title}' creada con éxito en Google Sheets con la tabla izquierda vacía!")
-                    st.rerun()
-                except Exception as e_new_tab:
-                    st.error(f"Error creando pestaña en Google Sheets: {e_new_tab}")
-
-# KPIs de inventario
-try:
-    kpis = service.get_kpis(items=items)
-except Exception:
-    kpis = {"total_items": len(items), "critical_count": 0, "normal_count": len(items), "total_valuation": 0.0}
-
-col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_sync = st.columns([2, 2, 2, 3, 3])
-with col_kpi1:
-    st.metric("Total Insumos", kpis["total_items"])
-with col_kpi2:
-    st.metric("⚠️ A Reponer", kpis["critical_count"], delta=-kpis["critical_count"] if kpis["critical_count"] > 0 else 0, delta_color="inverse")
-with col_kpi3:
-    st.metric("✅ Stock Óptimo", kpis["normal_count"])
-with col_kpi4:
-    st.metric("Valuación Total", f"${kpis['total_valuation']:,.2f}")
-with col_sync:
-    st.write("")
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        if st.button("🔄 Refrescar", use_container_width=True):
-            items = service.get_inventory(tab_name=st.session_state.active_tab, force_refresh=True)
-            available_tabs = service.get_available_tabs(force_refresh=True)
-            st.toast("Datos sincronizados con Google Sheets", icon="🔄")
+    col_tab1, col_tab2 = st.columns([5, 5])
+    with col_tab1:
+        tab_index = available_tabs.index(st.session_state.active_tab) if st.session_state.active_tab in available_tabs else 0
+        selected_tab_choice = st.selectbox(
+            "📅 Pestaña de Recuento Semanal Activa en Google Sheets:",
+            available_tabs,
+            index=tab_index,
+            help="Selecciona en qué pestaña de la planilla de Google Sheets impactan los escaneos y recuentos.",
+            key="weekly_tab_picker",
+        )
+        if selected_tab_choice != st.session_state.active_tab:
+            st.session_state.active_tab = selected_tab_choice
             st.rerun()
-    with col_s2:
-        if st.button("📲 Telegram", use_container_width=True):
-            res = service.trigger_batch_telegram_alerts(items=items)
-            if res["sent"]:
-                st.toast("Alerta enviada a Telegram", icon="✅")
-            else:
-                st.toast("Alerta simulada (ver .env)", icon="ℹ️")
+
+    with col_tab2:
+        st.write("")
+        is_current = (st.session_state.active_tab == current_week_tab)
+        badge_label = f"🟢 Pestaña Activa ({st.session_state.active_tab})" if is_current else f"📁 Histórico ({st.session_state.active_tab})"
+        st.markdown(f'<div style="margin-top: 4px;"><span class="tab-badge">{badge_label}</span> <span style="font-size: 0.85rem; color: #64748b;">(Todo escaneo impacta en la tabla izquierda de esta pestaña)</span></div>', unsafe_allow_html=True)
+        
+        with st.expander("➕ **Abrir / Crear Nueva Pestaña Semanal en Google Sheets**", expanded=False):
+            st.caption("Crea una nueva pestaña en Google Sheets duplicando la estructura base, con las fórmulas y catálogos pero con la tabla de la izquierda vacía para el nuevo recuento.")
+            next_monday = datetime.now() + timedelta(days=(7 - datetime.now().weekday()) % 7 or 7)
+            suggested_tab = f"STOCK_{next_monday.strftime('%d.%m.%y')}"
+            col_nt1, col_nt2 = st.columns([3, 2])
+            with col_nt1:
+                new_tab_name_input = st.text_input("Nombre de la nueva pestaña:", value=suggested_tab, key="new_tab_input_name")
+            with col_nt2:
+                st.write("")
+                st.write("")
+                if st.button("🚀 Crear Pestaña", type="primary", use_container_width=True):
+                    try:
+                        created_title = service.create_new_weekly_tab(new_tab_name_input.strip())
+                        st.session_state.active_tab = created_title
+                        available_tabs = service.get_available_tabs(force_refresh=True)
+                        st.success(f"¡Pestaña '{created_title}' creada con éxito en Google Sheets con la tabla izquierda vacía!")
+                        st.rerun()
+                    except Exception as e_new_tab:
+                        st.error(f"Error creando pestaña en Google Sheets: {e_new_tab}")
+
+    # KPIs de inventario
+    try:
+        kpis = service.get_kpis(items=items)
+    except Exception:
+        kpis = {"total_items": len(items), "critical_count": 0, "normal_count": len(items), "total_valuation": 0.0}
+
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_sync = st.columns([2, 2, 2, 3, 3])
+    with col_kpi1:
+        st.metric("Total Insumos", kpis["total_items"])
+    with col_kpi2:
+        st.metric("⚠️ A Reponer", kpis["critical_count"], delta=-kpis["critical_count"] if kpis["critical_count"] > 0 else 0, delta_color="inverse")
+    with col_kpi3:
+        st.metric("✅ Stock Óptimo", kpis["normal_count"])
+    with col_kpi4:
+        st.metric("Valuación Total", f"${kpis['total_valuation']:,.2f}")
+    with col_sync:
+        st.write("")
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            if st.button("🔄 Refrescar", use_container_width=True):
+                items = service.get_inventory(tab_name=st.session_state.active_tab, force_refresh=True)
+                available_tabs = service.get_available_tabs(force_refresh=True)
+                st.toast("Datos sincronizados con Google Sheets", icon="🔄")
+                st.rerun()
+        with col_s2:
+            if st.button("📲 Telegram", use_container_width=True):
+                res = service.trigger_batch_telegram_alerts(items=items)
+                if res["sent"]:
+                    st.toast("Alerta enviada a Telegram", icon="✅")
+                else:
+                    st.toast("Alerta simulada (ver .env)", icon="ℹ️")
 
 
 
@@ -1354,115 +1366,116 @@ if st.session_state.scan_history:
     with st.expander(f"🕒 Historial de escaneos de hoy ({len(st.session_state.scan_history)})", expanded=False):
         st.dataframe(pd.DataFrame(st.session_state.scan_history), use_container_width=True, hide_index=True)
 
-st.divider()
+if is_pc_app:
+    st.divider()
 
-# =========================================================================================
-# --- 5. PLANILLA GENERAL "STOCK BUENA MADERA" (ESTILO GOOGLE SHEETS) ---
-# =========================================================================================
-st.markdown(f"### 📋 Planilla General: {st.session_state.active_tab} (Estilo Google Sheets)")
-st.caption(f"Visualizando y editando la pestaña **{st.session_state.active_tab}** de Google Sheets.")
+    # =========================================================================================
+    # --- 5. PLANILLA GENERAL "STOCK BUENA MADERA" (ESTILO GOOGLE SHEETS) ---
+    # =========================================================================================
+    st.markdown(f"### 📋 Planilla General: {st.session_state.active_tab} (Estilo Google Sheets)")
+    st.caption(f"Visualizando y editando la pestaña **{st.session_state.active_tab}** de Google Sheets.")
 
-col_t1, col_t2, col_t3 = st.columns([2, 3, 2])
-with col_t1:
-    todas_cats = ["Todas"] + sorted(list(set(i.category for i in items)))
-    filtro_cat = st.selectbox("Categoría:", todas_cats)
-with col_t2:
-    filtro_busqueda = st.text_input("Filtrar planilla por texto:", placeholder="Buscar por código, madera, tela, tornillo...")
-with col_t3:
-    st.write("")
-    solo_criticos = st.checkbox("Solo insumos a reponer (Críticos)", value=False)
+    col_t1, col_t2, col_t3 = st.columns([2, 3, 2])
+    with col_t1:
+        todas_cats = ["Todas"] + sorted(list(set(i.category for i in items)))
+        filtro_cat = st.selectbox("Categoría:", todas_cats)
+    with col_t2:
+        filtro_busqueda = st.text_input("Filtrar planilla por texto:", placeholder="Buscar por código, madera, tela, tornillo...")
+    with col_t3:
+        st.write("")
+        solo_criticos = st.checkbox("Solo insumos a reponer (Críticos)", value=False)
 
-display_items = [i for i in items]
-if filtro_cat != "Todas":
-    display_items = [i for i in display_items if i.category.lower() == filtro_cat.lower()]
-if filtro_busqueda:
-    q = filtro_busqueda.strip().lower()
-    display_items = [
-        i for i in display_items
-        if q in i.barcode.lower() or q in i.description.lower() or (i.notes and q in i.notes.lower())
-    ]
-if solo_criticos:
-    display_items = [i for i in display_items if i.is_critical]
+    display_items = [i for i in items]
+    if filtro_cat != "Todas":
+        display_items = [i for i in display_items if i.category.lower() == filtro_cat.lower()]
+    if filtro_busqueda:
+        q = filtro_busqueda.strip().lower()
+        display_items = [
+            i for i in display_items
+            if q in i.barcode.lower() or q in i.description.lower() or (i.notes and q in i.notes.lower())
+        ]
+    if solo_criticos:
+        display_items = [i for i in display_items if i.is_critical]
 
-df_rows = []
-for it in display_items:
-    df_rows.append({
-        "Alerta": "⚠️ Comprar" if it.is_critical else "✅ OK",
-        "Codigo de Barras": it.barcode,
-        "Descipción de Producto": it.description,
-        "TOTAL INVENTARIO": float(it.current_stock),
-        "Cant. Inventario": float(it.cant_inventario),
-        "Compra Semana": float(it.compra_semana),
-        "Cant x Caja": str(it.cant_x_caja or "N/A"),
-        "Unidad": it.unit,
-        "Stock Mínimo": float(it.min_stock),
-        "$ x Unidad": float(it.unit_price),
-        "$ SubTotal": float(it.subtotal),
-        "Observaciones": str(it.notes or ""),
-    })
+    df_rows = []
+    for it in display_items:
+        df_rows.append({
+            "Alerta": "⚠️ Comprar" if it.is_critical else "✅ OK",
+            "Codigo de Barras": it.barcode,
+            "Descipción de Producto": it.description,
+            "TOTAL INVENTARIO": float(it.current_stock),
+            "Cant. Inventario": float(it.cant_inventario),
+            "Compra Semana": float(it.compra_semana),
+            "Cant x Caja": str(it.cant_x_caja or "N/A"),
+            "Unidad": it.unit,
+            "Stock Mínimo": float(it.min_stock),
+            "$ x Unidad": float(it.unit_price),
+            "$ SubTotal": float(it.subtotal),
+            "Observaciones": str(it.notes or ""),
+        })
 
-df_sheet = pd.DataFrame(df_rows)
+    df_sheet = pd.DataFrame(df_rows)
 
-if not df_sheet.empty:
-    edited_df = st.data_editor(
-        df_sheet,
-        use_container_width=True,
-        height=450,
-        disabled=["Alerta", "Codigo de Barras", "Descipción de Producto", "$ SubTotal", "Unidad"],
-        column_config={
-            "Alerta": st.column_config.TextColumn("Alerta", width="small"),
-            "Codigo de Barras": st.column_config.TextColumn("Codigo de Barras", width="medium"),
-            "Descipción de Producto": st.column_config.TextColumn("Descipción de Producto", width="large"),
-            "TOTAL INVENTARIO": st.column_config.NumberColumn("TOTAL INVENTARIO", min_value=0.0, format="%.2f"),
-            "Cant. Inventario": st.column_config.NumberColumn("Cant. Inventario", format="%.2f"),
-            "Compra Semana": st.column_config.NumberColumn("Compra Semana", format="%.2f"),
-            "Stock Mínimo": st.column_config.NumberColumn("Stock Mínimo", min_value=0.0, format="%.2f"),
-            "$ x Unidad": st.column_config.NumberColumn("$ x Unidad", format="$ %.2f"),
-            "$ SubTotal": st.column_config.NumberColumn("$ SubTotal", format="$ %.2f"),
-            "Observaciones": st.column_config.TextColumn("Observaciones", width="large"),
-        },
-        hide_index=True,
-        key="sheets_data_editor_main",
-    )
+    if not df_sheet.empty:
+        edited_df = st.data_editor(
+            df_sheet,
+            use_container_width=True,
+            height=450,
+            disabled=["Alerta", "Codigo de Barras", "Descipción de Producto", "$ SubTotal", "Unidad"],
+            column_config={
+                "Alerta": st.column_config.TextColumn("Alerta", width="small"),
+                "Codigo de Barras": st.column_config.TextColumn("Codigo de Barras", width="medium"),
+                "Descipción de Producto": st.column_config.TextColumn("Descipción de Producto", width="large"),
+                "TOTAL INVENTARIO": st.column_config.NumberColumn("TOTAL INVENTARIO", min_value=0.0, format="%.2f"),
+                "Cant. Inventario": st.column_config.NumberColumn("Cant. Inventario", format="%.2f"),
+                "Compra Semana": st.column_config.NumberColumn("Compra Semana", format="%.2f"),
+                "Stock Mínimo": st.column_config.NumberColumn("Stock Mínimo", min_value=0.0, format="%.2f"),
+                "$ x Unidad": st.column_config.NumberColumn("$ x Unidad", format="$ %.2f"),
+                "$ SubTotal": st.column_config.NumberColumn("$ SubTotal", format="$ %.2f"),
+                "Observaciones": st.column_config.TextColumn("Observaciones", width="large"),
+            },
+            hide_index=True,
+            key="sheets_data_editor_main",
+        )
 
-    if st.button("💾 Guardar Cambios Directos de la Planilla", type="primary"):
-        updated_count = 0
-        for _, row in edited_df.iterrows():
-            b_code = row["Codigo de Barras"]
-            new_tot = float(row["TOTAL INVENTARIO"])
-            new_cant_inv = float(row["Cant. Inventario"])
-            new_compra_sem = float(row["Compra Semana"])
-            new_min = float(row["Stock Mínimo"])
-            new_price = float(row["$ x Unidad"])
-            new_notes = str(row["Observaciones"]).strip() if row["Observaciones"] else None
+        if st.button("💾 Guardar Cambios Directos de la Planilla", type="primary"):
+            updated_count = 0
+            for _, row in edited_df.iterrows():
+                b_code = row["Codigo de Barras"]
+                new_tot = float(row["TOTAL INVENTARIO"])
+                new_cant_inv = float(row["Cant. Inventario"])
+                new_compra_sem = float(row["Compra Semana"])
+                new_min = float(row["Stock Mínimo"])
+                new_price = float(row["$ x Unidad"])
+                new_notes = str(row["Observaciones"]).strip() if row["Observaciones"] else None
 
-            for it in items:
-                if it.barcode == b_code:
-                    if (
-                        it.current_stock != new_tot
-                        or it.cant_inventario != new_cant_inv
-                        or it.compra_semana != new_compra_sem
-                        or it.min_stock != new_min
-                        or it.unit_price != new_price
-                        or (it.notes or "") != (new_notes or "")
-                    ):
-                        it.cant_inventario = new_cant_inv
-                        it.compra_semana = new_compra_sem
-                        it.current_stock = new_cant_inv + new_compra_sem if (new_cant_inv != it.cant_inventario or new_compra_sem != it.compra_semana) else new_tot
-                        it.min_stock = new_min
-                        it.unit_price = new_price
-                        it.subtotal = it.current_stock * new_price
-                        it.comprar = max(0.0, new_min - it.current_stock)
-                        it.notes = new_notes
-                        it.is_critical = it.current_stock <= new_min
-                        updated_count += 1
-                    break
-        
-        if updated_count > 0:
-            service.save_bulk_from_editor(items, tab_name=st.session_state.active_tab)
-            st.success(f"¡Se guardaron los cambios en {updated_count} productos en la pestaña '{st.session_state.active_tab}' exitosamente!")
-            st.rerun()
-        else:
-            st.info("No se detectaron modificaciones pendientes de guardar.")
-else:
-    st.info("No se encontraron materiales que coincidan con los filtros de búsqueda.")
+                for it in items:
+                    if it.barcode == b_code:
+                        if (
+                            it.current_stock != new_tot
+                            or it.cant_inventario != new_cant_inv
+                            or it.compra_semana != new_compra_sem
+                            or it.min_stock != new_min
+                            or it.unit_price != new_price
+                            or (it.notes or "") != (new_notes or "")
+                        ):
+                            it.cant_inventario = new_cant_inv
+                            it.compra_semana = new_compra_sem
+                            it.current_stock = new_cant_inv + new_compra_sem if (new_cant_inv != it.cant_inventario or new_compra_sem != it.compra_semana) else new_tot
+                            it.min_stock = new_min
+                            it.unit_price = new_price
+                            it.subtotal = it.current_stock * new_price
+                            it.comprar = max(0.0, new_min - it.current_stock)
+                            it.notes = new_notes
+                            it.is_critical = it.current_stock <= new_min
+                            updated_count += 1
+                        break
+            
+            if updated_count > 0:
+                service.save_bulk_from_editor(items, tab_name=st.session_state.active_tab)
+                st.success(f"¡Se guardaron los cambios en {updated_count} productos en la pestaña '{st.session_state.active_tab}' exitosamente!")
+                st.rerun()
+            else:
+                st.info("No se detectaron modificaciones pendientes de guardar.")
+    else:
+        st.info("No se encontraron materiales que coincidan con los filtros de búsqueda.")
