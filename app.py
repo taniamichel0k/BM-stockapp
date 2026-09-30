@@ -1,3 +1,5 @@
+import os
+import sys
 import threading
 import time
 import io
@@ -18,9 +20,23 @@ from config import settings
 from services.stock_service import StockService
 from services.sync_service import sync_service, LiveSyncService
 from services.tunnel_service import TunnelService
+from services.recipe_service import recipe_service
 from models.schemas import StockItem
 
 CLOUD_APP_URL = "https://bm-stockapp.streamlit.app"
+RECETAS_SHEET_URL = "https://docs.google.com/spreadsheets/d/10xjwh5YEcfRlVSAahAU5lEgNUTvimTq19JKN3gHeIb4/edit#gid=1917609246"
+
+# Detección de Plataforma: PC (Escritorio / .exe) vs Celular (Nube / QR)
+# Regla estricta del usuario: "Solo agregar eso en la app de pc, no en la de celular"
+query_app = str(st.query_params.get("app", "")).lower().strip()
+if query_app in ("mobile", "celular"):
+    is_pc_app = False
+elif query_app == "pc":
+    is_pc_app = True
+else:
+    # Por defecto: Si corre en Windows o es ejecutable .exe, es la app de PC.
+    # En Streamlit Cloud / Linux, es la app de celular.
+    is_pc_app = (os.name == 'nt') or getattr(sys, 'frozen', False)
 
 def generate_qr_base64(data_url: str, box_size: int = 6) -> str:
     try:
@@ -280,6 +296,19 @@ with st.sidebar:
     st.markdown("### **Control de Stock BM**")
     st.caption("Fábrica de Sillones • Buena Madera")
     st.divider()
+
+    # Selector de Módulo (ÚNICAMENTE EN LA APP DE PC)
+    if is_pc_app:
+        st.markdown("#### 📌 **Módulo de Trabajo**")
+        app_module = st.radio(
+            "Seleccionar módulo:",
+            ["📦 Control de Stock & Escáner", "🏭 Pedidos de Fabricación & Recetas"],
+            key="sb_pc_module_choice",
+            label_visibility="collapsed"
+        )
+        st.divider()
+    else:
+        app_module = "📦 Control de Stock & Escáner"
     
     st.markdown("#### 📅 **Pestaña Semanal**")
     tab_sb_idx = available_tabs.index(st.session_state.active_tab) if st.session_state.active_tab in available_tabs else 0
@@ -322,19 +351,20 @@ with st.sidebar:
     st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
     # Código QR y enlace permanente a la Nube (Generado localmente en base64)
-    qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=6)
+    mobile_cloud_url = f"{CLOUD_APP_URL}?app=mobile"
+    qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=6)
     st.markdown("**🌐 App Celular (Enlace Permanente):**")
     if qr_cloud_b64:
         st.markdown(f'''
         <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #0284c7; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
             <img src="data:image/png;base64,{qr_cloud_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
-            <a href="{CLOUD_APP_URL}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
+            <a href="{mobile_cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
                 {CLOUD_APP_URL} ↗
             </a>
         </div>
         ''', unsafe_allow_html=True)
     else:
-        st.markdown(f"👉 [{CLOUD_APP_URL}]({CLOUD_APP_URL})")
+        st.markdown(f"👉 [{CLOUD_APP_URL}]({mobile_cloud_url})")
     st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
 
     with st.expander("📶 Conexión directa por Wi-Fi Local"):
@@ -342,6 +372,358 @@ with st.sidebar:
         st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
         if tunnel_url and tunnel_url != CLOUD_APP_URL:
             st.caption(f"Túnel temporal PC: `{tunnel_url}`")
+
+
+def render_manufacturing_module(items, available_tabs, stock_service_instance):
+    """
+    Módulo exclusivo para la PC:
+    - Carga de nuevos pedidos de fabricación según modelo y tipo de tela.
+    - Previsualización inteligente del stock y semáforo de faltantes.
+    - Botón 'Confirmar pedido' que descuenta automáticamente del stock en Google Sheets.
+    - Historial de pedidos confirmados.
+    - Edición y consulta interactiva de la hoja RECETAS de Google Sheets.
+    """
+    st.markdown(f"""
+    <div class="sheets-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <img src="data:image/png;base64,{bm_icon_b64}" width="42" height="42" style="border-radius: 9px; vertical-align: middle; box-shadow: 0 2px 6px rgba(0,0,0,0.35); border: 1.5px solid rgba(255,255,255,0.35);">
+                <div>
+                    <h1 class="sheet-title">🏭 Pedidos de Fabricación & Recetas</h1>
+                    <p class="sheet-subtitle">Buena Madera • Descuento automático de stock en: <b>{st.session_state.active_tab}</b></p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <a href="{RECETAS_SHEET_URL}" target="_blank" style="background-color: #0284c7; color: white; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 0.85rem;">
+                    📊 Abrir Hoja RECETAS en Google Sheets ↗
+                </a>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Mensaje de confirmación reciente si existe
+    if st.session_state.get("show_success_msg"):
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #dcfce7, #bbf7d0); border: 2px solid #22c55e; border-radius: 12px; padding: 14px 18px; margin: 10px 0 16px 0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div style="font-size: 1.05rem; font-weight: 700; color: #15803d;">
+                    {st.session_state.show_success_msg}
+                </div>
+                <a href="https://docs.google.com/spreadsheets/d/10xjwh5YEcfRlVSAahAU5lEgNUTvimTq19JKN3gHeIb4/edit" target="_blank" style="background-color: #15803d; color: white; padding: 7px 12px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 0.85rem;">
+                    📊 Ver Stock Actualizado en Sheets ↗
+                </a>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Selector de Pestaña Semanal de Destino
+    col_t_top1, col_t_top2 = st.columns([6, 4])
+    with col_t_top1:
+        tab_idx = available_tabs.index(st.session_state.active_tab) if st.session_state.active_tab in available_tabs else 0
+        sel_tab = st.selectbox(
+            "📅 Pestaña Activa de Stock (Donde se descontarán los insumos):",
+            available_tabs,
+            index=tab_idx,
+            key="mfg_tab_selector",
+            help="Al confirmar el pedido, las cantidades se restarán de la columna 'Cant. Inventario' de esta semana."
+        )
+        if sel_tab != st.session_state.active_tab:
+            st.session_state.active_tab = sel_tab
+            st.rerun()
+
+    with col_t_top2:
+        st.write("")
+        st.write("")
+        col_t_b1, col_t_b2 = st.columns(2)
+        with col_t_b1:
+            if st.button("🔄 Refrescar Stock", use_container_width=True, key="mfg_btn_refresh_stock"):
+                stock_service_instance.get_inventory(tab_name=st.session_state.active_tab, force_refresh=True)
+                st.toast("Stock sincronizado con Google Sheets", icon="🔄")
+                st.rerun()
+        with col_t_b2:
+            st.markdown("""
+            <a href="https://docs.google.com/spreadsheets/d/10xjwh5YEcfRlVSAahAU5lEgNUTvimTq19JKN3gHeIb4/edit" target="_blank" style="display: block; text-align: center; background-color: #0284c7; color: white; padding: 7px 10px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 0.85rem; margin-top: 1px;">
+                📊 Ver Sheets ↗
+            </a>
+            """, unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+
+    tab_order, tab_history, tab_recipes = st.tabs([
+        "➕ Nuevo Pedido de Fabricación",
+        "📋 Historial de Pedidos de Fabricación",
+        "📝 Fichas Técnicas & Editar RECETAS"
+    ])
+
+    recipes_catalog = recipe_service.get_recipes()
+    model_names = sorted(list(recipes_catalog.keys()))
+    available_fabrics = recipe_service.get_available_fabrics()
+
+    # --- TAB 1: NUEVO PEDIDO DE FABRICACIÓN ---
+    with tab_order:
+        st.markdown("### 🛋️ Cargar Nuevo Pedido de Producción")
+        st.caption("Selecciona el modelo de sillón, tipo de tela y cantidad. El sistema calculará la explosión de materiales y descontará automáticamente del stock semanal.")
+
+        col_m1, col_m2, col_m3 = st.columns([5, 2, 4])
+        with col_m1:
+            selected_model = st.selectbox(
+                "Modelo del Sillón:",
+                model_names,
+                index=0 if model_names else None,
+                key="order_model_select",
+                help="Elige el modelo del catálogo oficial de recetas."
+            )
+        with col_m2:
+            order_qty = st.number_input(
+                "Cantidad a Fabricar:",
+                min_value=1,
+                max_value=100,
+                value=1,
+                step=1,
+                key="order_qty_input",
+                help="Cantidad de unidades del mismo modelo a producir."
+            )
+        with col_m3:
+            fabric_options = {f"{f['name']} (${f['unit_price']:,.0f}/m)": f["code"] for f in available_fabrics}
+            sel_fab_label = st.selectbox(
+                "Tipo de Tela (Tapizado):",
+                list(fabric_options.keys()),
+                key="order_fabric_select",
+                help="Determina los metros requeridos de la receta. El color no influye en la receta ni en el cálculo de stock."
+            )
+            selected_fabric_code = fabric_options[sel_fab_label]
+
+        order_note = st.text_input(
+            "Cliente / Nota de Producción (Opcional):",
+            placeholder="Ej: Pedido Gómez - Salón Principal",
+            key="order_client_note"
+        )
+
+        st.caption("💡 *Nota: Como se especificó en el taller, el tipo de tela determina los metros y costo del modelo. El color no influye en la receta ni en el cálculo de stock.*")
+
+        st.divider()
+
+        # Cálculo de Requerimientos y Previsualización Inteligente
+        if selected_model:
+            req_data = recipe_service.calculate_order_requirements(
+                model_name=selected_model,
+                quantity=order_qty,
+                fabric_code=selected_fabric_code
+            )
+            preview = recipe_service.preview_order_stock(
+                requirements=req_data["items"],
+                current_inventory=items
+            )
+
+            # Tarjetas de Métricas Resumen
+            col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+            with col_k1:
+                st.metric("🛋️ Pedido", f"{order_qty}x {selected_model}")
+            with col_k2:
+                st.metric("🧵 Tela Requerida", f"{req_data['meters_fabric']:g} metros")
+            with col_k3:
+                st.metric("📦 Insumos Distintos", f"{preview['total_items']} materiales")
+            with col_k4:
+                st.metric("💰 Costo Materiales", f"${preview['total_cost']:,.2f}")
+
+            st.write("")
+
+            # Semáforo de Disponibilidad de Fábrica
+            if preview["can_produce"]:
+                st.markdown("""
+                <div style="background: #f0fdf4; border: 1.5px solid #22c55e; border-radius: 10px; padding: 10px 16px; margin: 8px 0; color: #166534; font-weight: 700;">
+                    🟢 <b>Stock Disponible:</b> Hay insumos suficientes en fábrica para fabricar este pedido completo.
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="background: #fef2f2; border: 1.5px solid #ef4444; border-radius: 10px; padding: 10px 16px; margin: 8px 0; color: #991b1b; font-weight: 700;">
+                    ⚠️ <b>Faltante de Insumos:</b> Hay {preview['missing_count']} material(es) que no alcanzan en el stock actual para fabricar las {order_qty} unidad(es). Puedes confirmar si vas a reponerlos o ingresar la compra en breve.
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Tabla de Previsualización Inteligente
+            st.markdown("#### 🔍 **Previsualización Inteligente de Insumos:**")
+            
+            df_preview = pd.DataFrame(preview["rows"])
+            if not df_preview.empty:
+                display_cols = ["Código", "Insumo", "Requerido", "Unidad", "Stock Actual", "Quedará", "Estado", "Precio Unit.", "Subtotal"]
+                st.dataframe(
+                    df_preview[display_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Código": st.column_config.TextColumn("Código", width="small"),
+                        "Insumo": st.column_config.TextColumn("Insumo / Material", width="large"),
+                        "Requerido": st.column_config.NumberColumn("Requerido", format="%.2f"),
+                        "Unidad": st.column_config.TextColumn("Unidad", width="small"),
+                        "Stock Actual": st.column_config.NumberColumn("Stock Fábrica", format="%.2f"),
+                        "Quedará": st.column_config.NumberColumn("Quedará", format="%.2f"),
+                        "Estado": st.column_config.TextColumn("Estado Stock", width="medium"),
+                        "Precio Unit.": st.column_config.NumberColumn("Precio Ref.", format="$ %.2f"),
+                        "Subtotal": st.column_config.NumberColumn("Subtotal", format="$ %.2f"),
+                    }
+                )
+
+            st.write("")
+            col_b1, col_b2 = st.columns([3, 7])
+            with col_b1:
+                # Botón estrictamente con la leyenda pedida: "Confirmar pedido"
+                btn_confirm = st.button("Confirmar pedido", type="primary", use_container_width=True, key="btn_confirm_prod_order")
+            with col_b2:
+                st.caption(f"Al hacer clic, los insumos se descontarán automáticamente del conteo de stock en la pestaña **{st.session_state.active_tab}** de Google Sheets.")
+
+            if btn_confirm:
+                with st.spinner("Descontando insumos y sincronizando con Google Sheets..."):
+                    success, msg, count = recipe_service.confirm_and_deduct_order(
+                        model_name=selected_model,
+                        quantity=order_qty,
+                        fabric_code=selected_fabric_code,
+                        current_inventory=items,
+                        tab_name=st.session_state.active_tab,
+                        stock_service_instance=stock_service_instance,
+                        client_note=order_note
+                    )
+                if success:
+                    st.session_state.show_success_msg = f"🎉 ¡Pedido confirmado con éxito! Se descontaron **{count}** insumos para fabricar **{order_qty}x {selected_model}** en la pestaña **{st.session_state.active_tab}**."
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error(f"Error al confirmar pedido: {msg}")
+
+    # --- TAB 2: HISTORIAL DE PEDIDOS CONFIRMADOS ---
+    with tab_history:
+        st.markdown("### 📋 Historial de Pedidos de Fabricación Confirmados")
+        st.caption("Registro de todos los pedidos confirmados desde esta PC y descontados del inventario.")
+
+        orders_hist = recipe_service.get_orders_history()
+        if orders_hist:
+            df_hist_rows = []
+            for o in orders_hist:
+                df_hist_rows.append({
+                    "Fecha y Hora": o.get("date_str", "N/A"),
+                    "Modelo": o.get("model_name", "N/A"),
+                    "Cantidad": o.get("quantity", 1),
+                    "Tela": o.get("fabric_code", "N/A"),
+                    "Insumos Descontados": f"{o.get('deducted_items_count', 0)} insumos",
+                    "Costo Materiales": float(o.get("total_cost", 0.0)),
+                    "Pestaña Stock": o.get("tab_name", "N/A"),
+                    "Cliente / Nota": o.get("client_note", ""),
+                })
+            
+            st.dataframe(
+                pd.DataFrame(df_hist_rows),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Costo Materiales": st.column_config.NumberColumn("Costo Materiales", format="$ %.2f")
+                }
+            )
+
+            with st.expander("🔍 Ver detalle de insumos descontados por pedido", expanded=False):
+                for idx, o in enumerate(orders_hist[:10]):
+                    st.markdown(f"**#{idx+1} - {o.get('date_str')}: {o.get('quantity')}x {o.get('model_name')}** ({o.get('fabric_code')})")
+                    if o.get("details"):
+                        st.write(" • " + " • ".join(o["details"][:15]))
+                    st.divider()
+        else:
+            st.info("Aún no se han confirmado pedidos de fabricación en esta PC.")
+
+    # --- TAB 3: FICHAS TÉCNICAS & EDITAR HOJA RECETAS ---
+    with tab_recipes:
+        st.markdown("### 📝 Fichas Técnicas de Sillones & Modificar Hoja RECETAS")
+        st.caption("Permite consultar o editar las cantidades de insumos y precios unitarios de cada modelo de sillón, o abrir directamente la planilla.")
+
+        col_r_btn1, col_r_btn2 = st.columns([3, 2])
+        with col_r_btn1:
+            st.markdown(f"""
+            <a href="{RECETAS_SHEET_URL}" target="_blank" style="display: block; text-align: center; background-color: #0284c7; color: white; padding: 10px 14px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 0.95rem; margin-bottom: 12px;">
+                📊 Abrir Hoja 'RECETAS' en Google Sheets ↗
+            </a>
+            """, unsafe_allow_html=True)
+        with col_r_btn2:
+            if st.button("🔄 Recargar Fichas desde Sheets", use_container_width=True, key="btn_refresh_recetas_data"):
+                recipe_service.get_recipes(force_refresh=True)
+                st.toast("Fichas técnicas actualizadas desde Google Sheets", icon="🔄")
+                st.rerun()
+
+        st.divider()
+
+        inspect_model = st.selectbox(
+            "Seleccionar modelo para ver o editar su receta:",
+            model_names,
+            key="inspect_recipe_model_sel"
+        )
+
+        if inspect_model and inspect_model in recipes_catalog:
+            m_data = recipes_catalog[inspect_model]
+            meters = m_data.get("meters_required", 0.0)
+            items_list = m_data.get("items", [])
+
+            col_sub1, col_sub2 = st.columns(2)
+            with col_sub1:
+                st.markdown(f"**Metros de Tela Requeridos por Sillón:** `{meters:g} metros`")
+            with col_sub2:
+                base_cost = sum(it.get("subtotal", 0.0) for it in items_list)
+                st.markdown(f"**Costo Base Insumos (sin tela):** `${base_cost:,.2f}`")
+
+            st.write("")
+            st.markdown("**Lista de Materiales Base (BOM):**")
+            
+            recipe_table_rows = []
+            for it in items_list:
+                recipe_table_rows.append({
+                    "Código": it["code"],
+                    "Descripción": it["description"],
+                    "Cantidad Requerida": float(it["qty"]),
+                    "Unidad": it["unit"],
+                    "Precio Unitario": float(it.get("unit_price", 0.0)),
+                    "Subtotal": float(it.get("subtotal", 0.0)),
+                    "_row_index": it.get("row_index", 0)
+                })
+
+            df_edit_recipe = pd.DataFrame(recipe_table_rows)
+
+            edited_recipe_df = st.data_editor(
+                df_edit_recipe,
+                use_container_width=True,
+                height=320,
+                disabled=["Código", "Descripción", "Unidad", "Subtotal"],
+                column_config={
+                    "Código": st.column_config.TextColumn("Código Insumo", width="small"),
+                    "Descripción": st.column_config.TextColumn("Material", width="large"),
+                    "Cantidad Requerida": st.column_config.NumberColumn("Cantidad", min_value=0.0, format="%.2f"),
+                    "Unidad": st.column_config.TextColumn("Unidad", width="small"),
+                    "Precio Unitario": st.column_config.NumberColumn("Precio Unitario ($)", min_value=0.0, format="$ %.2f"),
+                    "Subtotal": st.column_config.NumberColumn("Subtotal", format="$ %.2f"),
+                },
+                hide_index=True,
+                key=f"data_editor_recipe_{inspect_model}"
+            )
+
+            if st.button("💾 Guardar Cambios en Hoja RECETAS", type="primary", key=f"btn_save_recipe_{inspect_model}"):
+                updated_items_payload = []
+                for _, row in edited_recipe_df.iterrows():
+                    updated_items_payload.append({
+                        "row_index": row["_row_index"],
+                        "qty": float(row["Cantidad Requerida"]),
+                        "unit_price": float(row["Precio Unitario"])
+                    })
+
+                with st.spinner("Guardando en la pestaña RECETAS de Google Sheets..."):
+                    ok_up, msg_up = recipe_service.update_recipe_items(inspect_model, updated_items_payload)
+                if ok_up:
+                    st.success(f"¡{msg_up}!")
+                    st.rerun()
+                else:
+                    st.error(f"Error: {msg_up}")
+
+
+# Si estamos en la PC y se seleccionó el módulo de fabricación, renderizar y detener ejecución del escáner
+if is_pc_app and app_module == "🏭 Pedidos de Fabricación & Recetas":
+    render_manufacturing_module(items, available_tabs, service)
+    st.stop()
 
 
 # --- 1. ENCABEZADO COMPACTO DE LA APP ---
@@ -578,7 +960,8 @@ def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
         
         with tab_sync:
             col_s_qr, col_s_info = st.columns([1, 2])
-            live_mirror_url = tunnel_url or f"http://{local_ip}:8501"
+            base_live = tunnel_url or f"http://{local_ip}:8501"
+            live_mirror_url = base_live + ("&app=mobile" if "?" in base_live else "?app=mobile")
             qr_live_b64 = generate_qr_base64(live_mirror_url, box_size=7)
             with col_s_qr:
                 if qr_live_b64:
@@ -608,7 +991,8 @@ def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
 
         with tab_cloud:
             col_c_qr, col_c_info = st.columns([1, 2])
-            qr_cloud_b64 = generate_qr_base64(CLOUD_APP_URL, box_size=7)
+            mobile_cloud_url = f"{CLOUD_APP_URL}?app=mobile"
+            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=7)
             with col_c_qr:
                 if qr_cloud_b64:
                     st.markdown(f'''
@@ -624,7 +1008,7 @@ def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
                 - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G.
                 - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
                 
-                👉 Enlace permanente: **[{CLOUD_APP_URL}]({CLOUD_APP_URL})**
+                👉 Enlace permanente: **[{CLOUD_APP_URL}]({mobile_cloud_url})**
                 
                 💡 **Para guardarla en tu celular:** Abre el enlace en Chrome o Safari, toca los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
                 """)
