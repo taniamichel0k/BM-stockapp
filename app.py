@@ -237,8 +237,8 @@ if "show_success_msg" not in st.session_state:
 if "cam_counter" not in st.session_state:
     st.session_state.cam_counter = 0
 
-# Sincronización en vivo entre PC y Celulares mediante fragmento nativo (1 segundo de intervalo)
-@st.fragment(run_every=1.0)
+# Sincronización en vivo entre PC y Celulares mediante fragmento nativo (0.5 segundos de intervalo)
+@st.fragment(run_every=0.5)
 def live_sync_watcher():
     shared_state = sync_service.get_state()
     server_version = shared_state.get("version", 0)
@@ -255,11 +255,12 @@ def live_sync_watcher():
             if action == "SCAN":
                 scanned_code = shared_state.get("barcode", "")
                 if scanned_code:
-                    # Si es la primera apertura en celular, sincronizar si fue escaneado en los últimos 5 minutos
+                    # Sincronizar si es un escaneo nuevo o reciente (<5 min)
                     if prev_ver > 0 or (time.time() - ts < 300):
-                        st.session_state.active_barcode = scanned_code
-                        st.session_state.show_success_msg = None
-                        st.rerun(scope="app")
+                        if st.session_state.get("active_barcode") != scanned_code:
+                            st.session_state.active_barcode = scanned_code
+                            st.session_state.show_success_msg = None
+                            st.rerun(scope="app")
             elif action == "CLEAR":
                 if st.session_state.get("active_barcode"):
                     st.session_state.active_barcode = ""
@@ -922,6 +923,27 @@ pwa_js_template = """
                     buffer += e.key;
                 }
             }, true);
+        }
+
+        if (!pWin.__sse_sync_attached) {
+            pWin.__sse_sync_attached = true;
+            try {
+                const sse = new EventSource('https://ntfy.sh/bm_stock_sync_buenamadera_76f1483e/sse');
+                sse.onmessage = function(ev) {
+                    try {
+                        const parsed = JSON.parse(ev.data);
+                        if (parsed && parsed.event === 'message' && parsed.message) {
+                            const msg = typeof parsed.message === 'string' ? JSON.parse(parsed.message) : parsed.message;
+                            if (msg && msg.action === 'SCAN' && msg.barcode) {
+                                const input = getScannerInput();
+                                if (input && input.value !== msg.barcode) {
+                                    triggerInputReact(input, msg.barcode);
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                };
+            } catch(e) {}
         }
     })();
     </script>

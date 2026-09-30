@@ -25,15 +25,16 @@ class LiveSyncService:
     """
     Servicio de sincronización en tiempo real entre múltiples dispositivos
     (PC con lector de barras NICTOM y Celular del operario/supervisor).
-    Persiste en disco para sincronización inter-proceso local y transmite mediante
-    retransmisor en la nube ultrarrápido (ntfy.sh) para sincronización en tiempo real
-    entre la app de escritorio y la app de celular en la nube (Streamlit Cloud / 4G / Wi-Fi).
+    Utiliza versionado monótono por milisegundos reales (timestamp epoch ms) para evitar
+    desincronizaciones y colisiones de estado tras limpiar la pantalla o reiniciar procesos.
     """
     _instance = None
     _listener_started = False
     _last_poll_time = 0.0
+    _lock = threading.Lock()
+    _last_version: int = int(time.time() * 1000)
     _state: Dict[str, Any] = {
-        "version": 0,
+        "version": int(time.time() * 1000),
         "action": "INIT",
         "barcode": "",
         "source": "SERVER",
@@ -53,6 +54,7 @@ class LiveSyncService:
                         saved = json.load(f)
                         if isinstance(saved, dict) and "version" in saved:
                             cls._state = saved
+                            cls._last_version = max(cls._last_version, int(saved.get("version", 0)))
             except Exception:
                 pass
             
@@ -62,6 +64,17 @@ class LiveSyncService:
                 t = threading.Thread(target=cls._run_cloud_listener, daemon=True)
                 t.start()
         return cls._instance
+
+    @classmethod
+    def _next_version(cls) -> int:
+        """Genera un número de versión estrictamente creciente basado en milisegundos epoch."""
+        with cls._lock:
+            now_ms = int(time.time() * 1000)
+            if now_ms <= cls._last_version:
+                cls._last_version += 1
+            else:
+                cls._last_version = now_ms
+            return cls._last_version
 
     @classmethod
     def _save_disk_only(cls):
@@ -98,36 +111,40 @@ class LiveSyncService:
         try:
             r = httpx.get(f"{CLOUD_URL}/json?poll=1", timeout=1.5)
             if r.status_code == 200:
-                max_ver = cls._state.get("version", 0)
-                latest_data = None
-                for line in r.text.strip().split("\n"):
-                    if line.strip():
-                        try:
-                            item = json.loads(line)
-                            if item.get("event") == "message":
-                                msg_raw = item.get("message")
-                                if msg_raw:
-                                    data = json.loads(msg_raw) if isinstance(msg_raw, str) else msg_raw
-                                    if isinstance(data, dict):
-                                        ver = data.get("version", 0)
-                                        if ver > max_ver:
-                                            max_ver = ver
-                                            latest_data = data
-                        except Exception:
-                            pass
-                if latest_data:
-                    cls._state = latest_data
-                    cls._save_disk_only()
+                with cls._lock:
+                    max_ver = cls._state.get("version", 0)
+                    latest_data = None
+                    for line in r.text.strip().split("\n"):
+                        if line.strip():
+                            try:
+                                item = json.loads(line)
+                                if item.get("event") == "message":
+                                    msg_raw = item.get("message")
+                                    if msg_raw:
+                                        data = json.loads(msg_raw) if isinstance(msg_raw, str) else msg_raw
+                                        if isinstance(data, dict):
+                                            ver = data.get("version", 0)
+                                            if ver > max_ver:
+                                                max_ver = ver
+                                                latest_data = data
+                            except Exception:
+                                pass
+                    if latest_data and max_ver > cls._state.get("version", 0):
+                        cls._state = latest_data
+                        cls._last_version = max(cls._last_version, max_ver)
+                        cls._save_disk_only()
         except Exception:
             pass
 
     @classmethod
     def _run_cloud_listener(cls):
-        """Hilo demonio permanente: lee eventos de la nube en tiempo real."""
+        """Hilo demonio permanente: lee eventos de la nube en tiempo real sin timeouts de inactividad."""
         cls._poll_cloud()
+        # Timeout sin límite de lectura para que no aborte la conexión durante silencios normales
+        stream_timeout = httpx.Timeout(connect=8.0, read=None, write=8.0, pool=None)
         while True:
             try:
-                with httpx.stream("GET", f"{CLOUD_URL}/json", timeout=60.0) as resp:
+                with httpx.stream("GET", f"{CLOUD_URL}/json", timeout=stream_timeout) as resp:
                     for line in resp.iter_lines():
                         if line.strip():
                             try:
@@ -138,13 +155,15 @@ class LiveSyncService:
                                         data = json.loads(msg_raw) if isinstance(msg_raw, str) else msg_raw
                                         if isinstance(data, dict):
                                             ver = data.get("version", 0)
-                                            if ver > cls._state.get("version", 0):
-                                                cls._state = data
-                                                cls._save_disk_only()
+                                            with cls._lock:
+                                                if ver > cls._state.get("version", 0):
+                                                    cls._state = data
+                                                    cls._last_version = max(cls._last_version, ver)
+                                                    cls._save_disk_only()
                             except Exception:
                                 pass
             except Exception:
-                time.sleep(2.0)
+                time.sleep(0.5)
                 cls._poll_cloud()
 
     @classmethod
@@ -155,44 +174,74 @@ class LiveSyncService:
             try:
                 with open(SYNC_FILE, "r", encoding="utf-8") as f:
                     disk_state = json.load(f)
-                    if isinstance(disk_state, dict) and disk_state.get("version", 0) > cls._state.get("version", 0):
-                        cls._state = disk_state
+                    if isinstance(disk_state, dict):
+                        d_ver = disk_state.get("version", 0)
+                        with cls._lock:
+                            if d_ver > cls._state.get("version", 0):
+                                cls._state = disk_state
+                                cls._last_version = max(cls._last_version, d_ver)
             except Exception:
                 pass
 
-        # 2. Polling de respaldo en segundo plano si pasaron más de 2 segundos
+        # 2. Polling de respaldo en segundo plano si pasaron más de 0.8 segundos
         now = time.time()
-        if now - cls._last_poll_time > 2.0:
+        if now - cls._last_poll_time > 0.8:
             cls._last_poll_time = now
             threading.Thread(target=cls._poll_cloud, daemon=True).start()
 
-        return cls._state.copy()
+        with cls._lock:
+            return cls._state.copy()
 
     @classmethod
     def broadcast_scan(cls, barcode: str, source: str = "Lector PC") -> int:
         """Emite un evento de escaneo para que todos los dispositivos (celulares/PCs) abran el producto."""
-        cls.get_state()
-        cls._state["version"] += 1
-        cls._state["action"] = "SCAN"
-        cls._state["barcode"] = barcode.strip().upper()
-        cls._state["source"] = source
-        cls._state["timestamp"] = time.time()
+        clean_barcode = str(barcode).replace('"', '-').replace("'", '-').replace('/', '-').replace('_', '-').replace('?', '-').strip().upper()
+        now = time.time()
+
+        # Evitar doble disparo inmediato idéntico (ej: evento JS + evento input Streamlit)
+        with cls._lock:
+            if (
+                cls._state.get("action") == "SCAN"
+                and cls._state.get("barcode") == clean_barcode
+                and (now - cls._state.get("timestamp", 0)) < 0.6
+            ):
+                return cls._state.get("version", 0)
+
+        new_ver = cls._next_version()
+        with cls._lock:
+            cls._state = {
+                "version": new_ver,
+                "action": "SCAN",
+                "barcode": clean_barcode,
+                "source": source,
+                "timestamp": now,
+                "product_name": cls._state.get("product_name", ""),
+                "new_stock": cls._state.get("new_stock", 0.0),
+                "tab_name": cls._state.get("tab_name", ""),
+            }
         cls._save_disk_only()
         cls._broadcast_cloud(cls._state.copy())
-        return cls._state["version"]
+        return new_ver
 
     @classmethod
     def broadcast_clear(cls, source: str = "Usuario") -> int:
         """Emite evento de limpieza de escaneo."""
-        cls.get_state()
-        cls._state["version"] += 1
-        cls._state["action"] = "CLEAR"
-        cls._state["barcode"] = ""
-        cls._state["source"] = source
-        cls._state["timestamp"] = time.time()
+        new_ver = cls._next_version()
+        now = time.time()
+        with cls._lock:
+            cls._state = {
+                "version": new_ver,
+                "action": "CLEAR",
+                "barcode": "",
+                "source": source,
+                "timestamp": now,
+                "product_name": "",
+                "new_stock": 0.0,
+                "tab_name": cls._state.get("tab_name", ""),
+            }
         cls._save_disk_only()
         cls._broadcast_cloud(cls._state.copy())
-        return cls._state["version"]
+        return new_ver
 
     @classmethod
     def broadcast_saved(
@@ -204,18 +253,23 @@ class LiveSyncService:
         source: str = "Dispositivo",
     ) -> int:
         """Emite notificación de stock guardado exitosamente."""
-        cls.get_state()
-        cls._state["version"] += 1
-        cls._state["action"] = "SAVED"
-        cls._state["barcode"] = barcode.strip().upper()
-        cls._state["product_name"] = product_name
-        cls._state["new_stock"] = new_stock
-        cls._state["tab_name"] = tab_name
-        cls._state["source"] = source
-        cls._state["timestamp"] = time.time()
+        new_ver = cls._next_version()
+        clean_barcode = str(barcode).replace('"', '-').replace("'", '-').replace('/', '-').replace('_', '-').replace('?', '-').strip().upper()
+        now = time.time()
+        with cls._lock:
+            cls._state = {
+                "version": new_ver,
+                "action": "SAVED",
+                "barcode": clean_barcode,
+                "product_name": product_name,
+                "new_stock": new_stock,
+                "tab_name": tab_name,
+                "source": source,
+                "timestamp": now,
+            }
         cls._save_disk_only()
         cls._broadcast_cloud(cls._state.copy())
-        return cls._state["version"]
+        return new_ver
 
     @staticmethod
     def get_local_ip() -> str:
