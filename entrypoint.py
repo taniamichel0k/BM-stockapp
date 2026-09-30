@@ -60,6 +60,9 @@ def kill_zombies_on_port(port=8501):
                 creationflags = 0x08000000 if sys.platform == "win32" else 0
                 subprocess.run(cmd, shell=True, capture_output=True, timeout=5, creationflags=creationflags)
                 time.sleep(0.5)
+        # Terminar túneles previos huérfanos
+        creationflags = 0x08000000 if sys.platform == "win32" else 0
+        subprocess.run('taskkill /F /IM "cloudflared.exe"', shell=True, capture_output=True, creationflags=creationflags)
     except Exception as e:
         print(f"[BOOT] kill_zombies_on_port warning: {e}")
 

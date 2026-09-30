@@ -39,15 +39,35 @@ class TunnelService:
 
     @classmethod
     def get_saved_url(cls) -> Optional[str]:
+        # Si el proceso del túnel murió, limpiar
+        if cls._process and cls._process.poll() is not None:
+            cls._url = None
+            cls._process = None
+
+        if cls._url:
+            return cls._url
+
         if TUNNEL_URL_FILE.exists():
+            # Solo confiar si cloudflared está realmente en ejecución
+            if not cls.is_cloudflared_running():
+                try:
+                    TUNNEL_URL_FILE.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return None
             try:
+                # Comprobar edad del archivo (si tiene más de 3 horas, descartar)
+                mtime = os.path.getmtime(TUNNEL_URL_FILE)
+                if time.time() - mtime > 10800:
+                    TUNNEL_URL_FILE.unlink(missing_ok=True)
+                    return None
                 url = TUNNEL_URL_FILE.read_text(encoding="utf-8").strip()
                 if url.startswith("https://") and "trycloudflare.com" in url:
                     cls._url = url
                     return url
             except Exception:
                 pass
-        return cls._url
+        return None
 
     @classmethod
     def is_cloudflared_running(cls) -> bool:
@@ -63,12 +83,24 @@ class TunnelService:
     def start_tunnel_in_background(cls, port: int = 8501) -> None:
         """Inicia el túnel de Cloudflare en segundo plano si cloudflared.exe está disponible."""
         with cls._lock:
-            # Si ya tenemos proceso propio o cloudflared ya está activo con URL guardada, no duplicar
-            if (cls._process and cls._process.poll() is None) or (cls.is_cloudflared_running() and cls.get_saved_url()):
+            # Si ya tenemos un proceso activo y una URL válida, no reiniciar
+            if cls._process and cls._process.poll() is None and cls._url:
                 return
 
             if not CLOUDFLARED_EXE.exists():
                 return
+
+            # Terminar instancias huérfanas de cloudflared para no acumular procesos ni URLs vencidas
+            if cls.is_cloudflared_running() and not cls._process:
+                try:
+                    subprocess.run('taskkill /F /IM "cloudflared.exe"', shell=True, capture_output=True)
+                except Exception:
+                    pass
+                cls._url = None
+                try:
+                    TUNNEL_URL_FILE.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
             def _run():
                 try:
@@ -90,22 +122,24 @@ class TunnelService:
                     )
                     
                     url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+                    # Consumir el stream continuamente para evitar deadlocks de buffer en Windows
                     for line in cls._process.stdout:
-                        match = url_pattern.search(line)
-                        if match:
-                            found_url = match.group(0)
-                            cls._url = found_url
-                            try:
-                                TUNNEL_URL_FILE.parent.mkdir(parents=True, exist_ok=True)
-                                TUNNEL_URL_FILE.write_text(found_url, encoding="utf-8")
-                            except Exception:
-                                pass
-                            print(f"[TUNNEL] Cloudflare Tunnel activo: {found_url}")
-                            break
+                        if not cls._url:
+                            match = url_pattern.search(line)
+                            if match:
+                                found_url = match.group(0)
+                                cls._url = found_url
+                                try:
+                                    TUNNEL_URL_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                    TUNNEL_URL_FILE.write_text(found_url, encoding="utf-8")
+                                except Exception:
+                                    pass
+                                print(f"[TUNNEL] Cloudflare Tunnel activo: {found_url}")
                 except Exception as e:
-                    print(f"[TUNNEL] Error al iniciar Cloudflare Tunnel: {e}")
+                    print(f"[TUNNEL] Error en Cloudflare Tunnel: {e}")
 
-            threading.Thread(target=_run, daemon=True).start()
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
 
     @classmethod
     def stop_tunnel(cls):
@@ -116,3 +150,8 @@ class TunnelService:
                 except Exception:
                     pass
             cls._process = None
+            cls._url = None
+            try:
+                TUNNEL_URL_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass

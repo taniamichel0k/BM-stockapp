@@ -351,7 +351,7 @@ with st.sidebar:
     st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
     # Código QR y enlace permanente a la Nube (Generado localmente en base64)
-    mobile_cloud_url = f"{CLOUD_APP_URL}?app=mobile"
+    mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
     qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=6)
     st.markdown("**🌐 App Celular (Enlace Permanente):**")
     if qr_cloud_b64:
@@ -950,18 +950,43 @@ def on_dropdown_select():
 def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
     """
     Componente para vincular la aplicación de celular con la app de escritorio mediante código QR.
-    Ofrece Modo Espejo en tiempo real (PC ⇄ Celular) y Modo Nube 24/7 permanente.
+    Ofrece Modo Nube 24/7 permanente (Recomendado) y Modo Espejo en tiempo real (PC ⇄ Celular).
     """
     with st.expander("📱 **Vincular Celular a la App de Escritorio (Escanear Código QR)**", expanded=expanded):
-        tab_sync, tab_cloud = st.tabs([
-            "⚡ Modo Espejo en Vivo (Refleja el escáner de la PC)",
-            "🌐 App Celular Permanente (En la Nube 24/7)"
+        tab_cloud, tab_sync = st.tabs([
+            "🌐 App Celular Permanente (Recomendada 24/7)",
+            "⚡ Modo Espejo en Vivo (Refleja el escáner de la PC)"
         ])
+
+        with tab_cloud:
+            col_c_qr, col_c_info = st.columns([1, 2])
+            mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
+            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=7)
+            with col_c_qr:
+                if qr_cloud_b64:
+                    st.markdown(f'''
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
+                        <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
+                        <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear para App Celular</span>
+                    </div>
+                    ''', unsafe_allow_html=True)
+            with col_c_info:
+                st.markdown(f"""
+                #### 🌐 **App Fija en la Nube (24/7 sin PC):**
+                Esta versión funciona permanentemente en internet sin importar si la PC está prendida o apagada:
+                - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G o Wi-Fi.
+                - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
+                
+                👉 Enlace permanente: **[{CLOUD_APP_URL}]({mobile_cloud_url})**
+                
+                💡 **Para guardarla en tu celular:** Abre el enlace en Safari o Chrome, toca el botón de compartir o los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
+                """)
         
         with tab_sync:
             col_s_qr, col_s_info = st.columns([1, 2])
-            base_live = tunnel_url or f"http://{local_ip}:8501"
-            live_mirror_url = base_live + ("&app=mobile" if "?" in base_live else "?app=mobile")
+            active_tunnel = TunnelService.get_saved_url()
+            base_live = active_tunnel or f"http://{local_ip}:8501"
+            live_mirror_url = base_live + ("&app=mobile" if "?" in base_live else "/?app=mobile")
             qr_live_b64 = generate_qr_base64(live_mirror_url, box_size=7)
             with col_s_qr:
                 if qr_live_b64:
@@ -984,34 +1009,10 @@ def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
                 
                 👉 Enlace de conexión directa: **[{live_mirror_url}]({live_mirror_url})**
                 """)
-                if tunnel_url:
-                    st.caption("✨ Funciona conectado por Wi-Fi o datos móviles 4G mediante túnel seguro.")
+                if active_tunnel:
+                    st.caption("✨ Conectado mediante túnel activo de Cloudflare.")
                 else:
-                    st.caption(f"📶 Requiere estar conectado a la misma red Wi-Fi del taller (`{local_ip}`).")
-
-        with tab_cloud:
-            col_c_qr, col_c_info = st.columns([1, 2])
-            mobile_cloud_url = f"{CLOUD_APP_URL}?app=mobile"
-            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=7)
-            with col_c_qr:
-                if qr_cloud_b64:
-                    st.markdown(f'''
-                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
-                        <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
-                        <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear para App en la Nube</span>
-                    </div>
-                    ''', unsafe_allow_html=True)
-            with col_c_info:
-                st.markdown(f"""
-                #### 🌐 **App Fija en la Nube (24/7 sin PC):**
-                Esta versión funciona permanentemente en internet sin importar si la PC está prendida o apagada:
-                - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G.
-                - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
-                
-                👉 Enlace permanente: **[{CLOUD_APP_URL}]({mobile_cloud_url})**
-                
-                💡 **Para guardarla en tu celular:** Abre el enlace en Chrome o Safari, toca los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
-                """)
+                    st.caption(f"📶 Requiere que tu celular esté conectado a la misma red Wi-Fi del taller (`{local_ip}`).")
 
 # Mensaje de confirmación cuando se acaba de guardar un stock o crear pestaña
 if st.session_state.get("show_success_msg"):
