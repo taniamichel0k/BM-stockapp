@@ -63,8 +63,19 @@ class TunnelService:
                     return None
                 url = TUNNEL_URL_FILE.read_text(encoding="utf-8").strip()
                 if url.startswith("https://") and "trycloudflare.com" in url:
-                    cls._url = url
-                    return url
+                    # Validar rápidamente que la URL responda
+                    try:
+                        import httpx
+                        r = httpx.get(url, timeout=1.5)
+                        if r.status_code == 200:
+                            cls._url = url
+                            return url
+                        else:
+                            TUNNEL_URL_FILE.unlink(missing_ok=True)
+                            return None
+                    except Exception:
+                        TUNNEL_URL_FILE.unlink(missing_ok=True)
+                        return None
             except Exception:
                 pass
         return None

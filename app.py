@@ -223,6 +223,18 @@ local_ip = LiveSyncService.get_local_ip()
 tunnel_url = TunnelService.get_saved_url()
 mobile_url = tunnel_url or f"http://{local_ip}:8501"
 
+# Despertar automáticamente en segundo plano la app en la nube (Streamlit Cloud)
+def _wake_cloud_app_silent():
+    try:
+        import httpx
+        httpx.get(f"{CLOUD_APP_URL}/?app=mobile", timeout=4.0)
+    except Exception:
+        pass
+
+if is_pc_app and "cloud_app_woken" not in st.session_state:
+    st.session_state.cloud_app_woken = True
+    threading.Thread(target=_wake_cloud_app_silent, daemon=True).start()
+
 # Inicialización de estado de sesión
 if "sync_version" not in st.session_state:
     st.session_state.sync_version = 0
@@ -362,28 +374,39 @@ with st.sidebar:
         )
         st.session_state.sync_mode = "MIRROR" if selected_mode == "Espejo en Tiempo Real (Recomendado)" else "INDEPENDENT"
 
-        # Código QR y enlace permanente a la Nube (Generado localmente en base64)
-        mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
-        qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=6)
-        st.markdown("**🌐 App Celular (Enlace Permanente):**")
-        if qr_cloud_b64:
+        # Conexión Directa en el Taller (Wi-Fi Local o Túnel) - NO duerme y refleja al instante
+        active_tunnel = TunnelService.get_saved_url()
+        base_live = active_tunnel or f"http://{local_ip}:8501"
+        live_mirror_url = base_live + ("&app=mobile" if "?" in base_live else "/?app=mobile")
+        qr_live_b64 = generate_qr_base64(live_mirror_url, box_size=6)
+
+        st.markdown("**⚡ Conectar Celular al Escáner:**")
+        if qr_live_b64:
             st.markdown(f'''
-            <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #0284c7; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
-                <img src="data:image/png;base64,{qr_cloud_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
-                <a href="{mobile_cloud_url}" target="_blank" style="font-size: 0.82rem; font-weight: bold; color: #0284c7; text-decoration: none;">
-                    {CLOUD_APP_URL} ↗
+            <div style="text-align: center; margin: 6px 0; background: white; padding: 8px; border-radius: 10px; border: 1.5px solid #16a34a; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
+                <img src="data:image/png;base64,{qr_live_b64}" width="145" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
+                <a href="{live_mirror_url}" target="_blank" style="font-size: 0.80rem; font-weight: bold; color: #166534; text-decoration: none;">
+                    {live_mirror_url} ↗
                 </a>
             </div>
             ''', unsafe_allow_html=True)
         else:
-            st.markdown(f"👉 [{CLOUD_APP_URL}]({mobile_cloud_url})")
-        st.caption("✨ Escaneá este QR con la cámara de cualquier celular para abrir o instalar la app fija.")
+            st.markdown(f"👉 [{live_mirror_url}]({live_mirror_url})")
+        st.caption("✨ **Recomendado en el taller:** Refleja el lector NICTOM al instante y **nunca se va a dormir**.")
 
-        with st.expander("📶 Conexión directa por Wi-Fi Local"):
-            local_url = f"http://{local_ip}:8501"
-            st.caption(f"Si estás en el mismo Wi-Fi del taller: `{local_url}`")
-            if tunnel_url and tunnel_url != CLOUD_APP_URL:
-                st.caption(f"Túnel temporal PC: `{tunnel_url}`")
+        with st.expander("🌐 App Permanente en la Nube (PC apagada)"):
+            mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
+            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=5)
+            if qr_cloud_b64:
+                st.markdown(f'''
+                <div style="text-align: center; margin: 4px 0; background: white; padding: 6px; border-radius: 8px; border: 1px solid #0284c7;">
+                    <img src="data:image/png;base64,{qr_cloud_b64}" width="125" style="border-radius: 6px; display: block; margin: 0 auto;"><br>
+                    <a href="{mobile_cloud_url}" target="_blank" style="font-size: 0.78rem; font-weight: bold; color: #0284c7; text-decoration: none;">
+                        {CLOUD_APP_URL} ↗
+                    </a>
+                </div>
+                ''', unsafe_allow_html=True)
+            st.caption("📱 Para consultar stock fuera del taller con la PC apagada. Si Streamlit dice que se durmió, toca el botón azul para reactivarla.")
 
 
 def render_manufacturing_module(items, available_tabs, stock_service_instance):
@@ -983,38 +1006,14 @@ def on_dropdown_select():
 def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
     """
     Componente para vincular la aplicación de celular con la app de escritorio mediante código QR.
-    Ofrece Modo Nube 24/7 permanente (Recomendado) y Modo Espejo en tiempo real (PC ⇄ Celular).
+    Ofrece Modo Espejo en tiempo real (PC ⇄ Celular - Recomendado para escaneo) y Modo Nube para consulta remota.
     """
     with st.expander("📱 **Vincular Celular a la App de Escritorio (Escanear Código QR)**", expanded=expanded):
-        tab_cloud, tab_sync = st.tabs([
-            "🌐 App Celular Permanente (Recomendada 24/7)",
-            "⚡ Modo Espejo en Vivo (Refleja el escáner de la PC)"
+        tab_sync, tab_cloud = st.tabs([
+            "⚡ Modo Espejo en Vivo (PC ⇄ Celular - Recomendado)",
+            "🌐 App Celular en la Nube (Para usar sin la PC)"
         ])
 
-        with tab_cloud:
-            col_c_qr, col_c_info = st.columns([1, 2])
-            mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
-            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=7)
-            with col_c_qr:
-                if qr_cloud_b64:
-                    st.markdown(f'''
-                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
-                        <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
-                        <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear para App Celular</span>
-                    </div>
-                    ''', unsafe_allow_html=True)
-            with col_c_info:
-                st.markdown(f"""
-                #### 🌐 **App Fija en la Nube (24/7 sin PC):**
-                Esta versión funciona permanentemente en internet sin importar si la PC está prendida o apagada:
-                - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G o Wi-Fi.
-                - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
-                
-                👉 Enlace permanente: **[{CLOUD_APP_URL}]({mobile_cloud_url})**
-                
-                💡 **Para guardarla en tu celular:** Abre el enlace en Safari o Chrome, toca el botón de compartir o los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
-                """)
-        
         with tab_sync:
             col_s_qr, col_s_info = st.columns([1, 2])
             active_tunnel = TunnelService.get_saved_url()
@@ -1035,17 +1034,48 @@ def render_phone_linking_card(key_suffix: str = "main", expanded: bool = True):
             with col_s_info:
                 st.markdown(f"""
                 #### ⚡ **Modo Espejo en Tiempo Real (PC ⇄ Celular):**
-                Al escanear este código QR, tu celular se conecta **directamente a esta computadora**:
+                Al escanear este código QR con tu celular, se conecta **directamente a este programa en la computadora**:
                 1. **Disparas con el lector NICTOM en la PC.**
-                2. **El producto aparece inmediatamente en la pantalla de tu celular** en tiempo real.
-                3. Puedes ingresar el conteo físico, compras, stock mínimo o notas desde el celular y guardar directamente en Google Sheets.
+                2. **El producto aparece al instante en la pantalla de tu celular** en tiempo real.
+                3. Puedes ingresar conteos físicos, compras, stock mínimo o notas desde el celular y guardar directamente en Google Sheets.
                 
                 👉 Enlace de conexión directa: **[{live_mirror_url}]({live_mirror_url})**
+                
+                ✨ **100% Estable:** No depende de servidores en la nube externos ni se va a dormir. Mientras este programa esté abierto en la PC, la conexión es continua, privada e instantánea.
                 """)
                 if active_tunnel:
-                    st.caption("✨ Conectado mediante túnel activo de Cloudflare.")
+                    st.caption("🌐 Conectado mediante túnel activo de Cloudflare.")
                 else:
-                    st.caption(f"📶 Requiere que tu celular esté conectado a la misma red Wi-Fi del taller (`{local_ip}`).")
+                    st.caption(f"📶 Requiere que tu celular esté conectado al mismo Wi-Fi del taller (`{local_ip}`).")
+
+        with tab_cloud:
+            col_c_qr, col_c_info = st.columns([1, 2])
+            mobile_cloud_url = f"{CLOUD_APP_URL}/?app=mobile"
+            qr_cloud_b64 = generate_qr_base64(mobile_cloud_url, box_size=7)
+            with col_c_qr:
+                if qr_cloud_b64:
+                    st.markdown(f'''
+                    <div style="text-align: center; padding: 10px; background: white; border-radius: 12px; border: 2px solid #0284c7; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15); display: inline-block;">
+                        <img src="data:image/png;base64,{qr_cloud_b64}" width="165" style="display: block; margin: 0 auto; border-radius: 8px;"><br>
+                        <span style="font-size: 0.8rem; font-weight: 700; color: #0369a1;">🌐 Escanear para App Celular</span>
+                    </div>
+                    ''', unsafe_allow_html=True)
+            with col_c_info:
+                st.markdown(f"""
+                #### 🌐 **App en la Nube (Para cuando la PC esté apagada):**
+                Esta versión funciona permanentemente en internet para consultar stock cuando no estás en el taller:
+                - Podés consultar stock, buscar insumos y cargar compras o recuentos desde cualquier lugar con 4G o Wi-Fi.
+                - Todos los cambios se guardan directamente en la misma planilla de Google Sheets.
+                
+                👉 Enlace permanente: **[{CLOUD_APP_URL}]({mobile_cloud_url})**
+                
+                ℹ️ **¿Por qué Streamlit dice 'This app has gone to sleep'?**
+                Streamlit Cloud es un servicio gratuito que suspende automáticamente servidores inactivos tras varios días sin uso:
+                - **No tienes que usarla todos los días.**
+                - Si al entrar ves ese cartel, simplemente haz clic en el botón azul **'Yes, get this app back up!'** y en 1 minuto estará funcionando.
+                
+                💡 **Para guardarla en tu celular:** Abre el enlace en Safari o Chrome, toca el botón de compartir o los 3 puntitos y elige **"Agregar a la pantalla de inicio"**.
+                """)
 
 # Mensaje de confirmación cuando se acaba de guardar un stock o crear pestaña
 if st.session_state.get("show_success_msg"):
